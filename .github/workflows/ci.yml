@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore MediaIntelligence.slnx
+
+      - name: Build
+        run: dotnet build MediaIntelligence.slnx -c Release --no-restore
+
+      - name: Run offline tests
+        run: dotnet test MediaIntelligence.slnx -c Release --no-build --no-restore

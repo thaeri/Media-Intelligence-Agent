@@ -1,6 +1,18 @@
 @MediaIntelligence.Api_HostAddress = http://localhost:5215
 
-GET {{MediaIntelligence.Api_HostAddress}}/weatherforecast/
+GET {{MediaIntelligence.Api_HostAddress}}/api/media
 Accept: application/json
 
 ###
+
+GET {{MediaIntelligence.Api_HostAddress}}/api/media/22222222-2222-2222-2222-222222222222/analytics
+Accept: application/json
+
+###
+
+POST {{MediaIntelligence.Api_HostAddress}}/api/agent/ask
+Content-Type: application/json
+
+{
+  "question": "For City Stories, what is the cross-device audience reach and average ad frequency?"
+}
