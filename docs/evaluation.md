@@ -5,8 +5,8 @@ local Ollama smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The repository currently contains 33 xUnit tests. They do not call Ollama,
-OpenAI, external services, databases, or telemetry infrastructure.
+The repository currently contains 42 xUnit tests. They do not call Ollama,
+OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 
 ### Deterministic analytics
 
@@ -54,6 +54,15 @@ method. It verifies:
 - Completed requests emit request, duration, round, tool, and evidence tags.
 - Failed and timed-out operations use the expected status and activity error
   state.
+
+### LLM provider configuration
+
+- Ollama and `qwen3:4b` remain the defaults.
+- OpenAI and Foundry selection uses the configured model or deployment.
+- Missing selected-provider credentials and invalid Foundry endpoint shapes
+  fail validation.
+- Unsupported provider values and out-of-range timeouts are rejected.
+- Provider tests only resolve configuration metadata and never send requests.
 
 ## Live Ollama smoke observations
 

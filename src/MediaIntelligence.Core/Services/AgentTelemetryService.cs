@@ -11,10 +11,14 @@ public sealed class AgentTelemetryService
         new(ActivitySourceName);
 
     private readonly ILogger<AgentTelemetryService> _logger;
+    private readonly LlmClientMetadata _llm;
 
-    public AgentTelemetryService(ILogger<AgentTelemetryService> logger)
+    public AgentTelemetryService(
+        ILogger<AgentTelemetryService> logger,
+        LlmClientMetadata llm)
     {
         _logger = logger;
+        _llm = llm;
     }
 
     public AgentRequestTelemetry BeginRequest(string requestId)
@@ -22,7 +26,8 @@ public sealed class AgentTelemetryService
         return new AgentRequestTelemetry(
             requestId,
             ActivitySource,
-            _logger);
+            _logger,
+            _llm);
     }
 }
 
@@ -31,6 +36,7 @@ public sealed class AgentRequestTelemetry : IDisposable
     private readonly string _requestId;
     private readonly Activity? _activity;
     private readonly ILogger _logger;
+    private readonly LlmClientMetadata _llm;
     private readonly IDisposable? _logScope;
     private readonly long _startedAt = Stopwatch.GetTimestamp();
     private int _llmRounds;
@@ -40,20 +46,27 @@ public sealed class AgentRequestTelemetry : IDisposable
     internal AgentRequestTelemetry(
         string requestId,
         ActivitySource activitySource,
-        ILogger logger)
+        ILogger logger,
+        LlmClientMetadata llm)
     {
         _requestId = requestId;
         _logger = logger;
+        _llm = llm;
         _logScope = logger.BeginScope(new Dictionary<string, object>
         {
             ["AgentRequestId"] = requestId
         });
         _activity = activitySource.StartActivity("agent.request");
         _activity?.SetTag("agent.request.id", requestId);
+        _activity?.SetTag("gen_ai.provider.name", llm.Provider);
+        _activity?.SetTag("gen_ai.request.model", llm.Model);
 
         _logger.LogInformation(
-            "Agent request {AgentRequestId} started",
-            requestId);
+            "Agent request {AgentRequestId} started with provider " +
+            "{LlmProvider} and model {LlmModel}",
+            requestId,
+            llm.Provider,
+            llm.Model);
     }
 
     public Activity? StartLlmRound(int round)
@@ -62,6 +75,8 @@ public sealed class AgentRequestTelemetry : IDisposable
         var activity = AgentTelemetryActivities.Start("agent.llm.round");
         activity?.SetTag("agent.request.id", _requestId);
         activity?.SetTag("agent.llm.round", round);
+        activity?.SetTag("gen_ai.provider.name", _llm.Provider);
+        activity?.SetTag("gen_ai.request.model", _llm.Model);
         return activity;
     }
 
@@ -151,12 +166,15 @@ public sealed class AgentRequestTelemetry : IDisposable
         _logger.LogInformation(
             "Agent request {AgentRequestId} finished with {AgentStatus} in " +
             "{TotalDurationMs} ms after {LlmRounds} LLM rounds and " +
-            "{ToolCalls} tool calls; evidence verified: {EvidenceVerified}",
+            "{ToolCalls} tool calls; provider {LlmProvider}, model " +
+            "{LlmModel}, evidence verified: {EvidenceVerified}",
             _requestId,
             status,
             duration.TotalMilliseconds,
             _llmRounds,
             _toolCalls,
+            _llm.Provider,
+            _llm.Model,
             evidenceVerified);
 
         _activity?.Dispose();

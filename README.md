@@ -2,7 +2,8 @@
 
 A local-first .NET 10 reference implementation for grounded media analytics.
 The API combines deterministic analytics over synthetic OTT viewing data with
-an Ollama-hosted `qwen3:4b` agent, tool calling, evidence verification,
+an interchangeable Ollama, OpenAI, or Microsoft Foundry agent, tool calling,
+evidence verification,
 privacy-safe audience identity resolution, and structured observability.
 
 This repository is an engineering demonstration. It contains no production
@@ -13,7 +14,8 @@ matching.
 
 - Deterministic completion-rate and advertising-exposure analytics.
 - Single-title analytics and cross-title performance comparisons.
-- A local LLM agent with explicit analytics tools and bounded tool-call rounds.
+- A configuration-selected LLM agent with explicit analytics tools and bounded
+  tool-call rounds; Ollama remains the default.
 - Numeric evidence verification by metric and title/cohort before a model
   response is returned.
 - Synthetic cross-device audience deduplication using explicit pseudonymous
@@ -35,9 +37,9 @@ MediaIntelligence.Api
   Controllers and dependency injection
           |
 MediaIntelligence.Core
-  Agent | analytics | identity | evidence | telemetry | synthetic repository
+  Agent | LLM provider factory | analytics | identity | evidence | telemetry
           |
-Ollama OpenAI-compatible endpoint (localhost only)
+Ollama | OpenAI API | Microsoft Foundry model inference
 ```
 
 See [Architecture](docs/architecture.md) for the component diagram and request
@@ -48,14 +50,17 @@ flow. Audience metric definitions are documented in
 
 - .NET 10 / ASP.NET Core Web API
 - C# 14
-- OpenAI .NET client configured for Ollama's OpenAI-compatible endpoint
+- Official OpenAI .NET client and Azure Identity
 - Ollama `qwen3:4b`
+- OpenAI Chat Completions with `gpt-4.1-mini` by default
+- Microsoft Foundry `/openai/v1/` model inference with Entra ID or API key
 - xUnit and Microsoft Test SDK
 - `ILogger` structured logging
 - `System.Diagnostics.ActivitySource`
 - GitHub Actions using the .NET 10 SDK
 
-No database, external telemetry backend, cloud LLM, or API key is required.
+No database or external telemetry backend is required. The default Ollama
+configuration requires no cloud account or paid request.
 
 ## Windows setup
 
@@ -96,6 +101,74 @@ dotnet run --project src/MediaIntelligence.Api --launch-profile http
 The HTTP launch profile listens on `http://localhost:5215`. The agent client
 connects to Ollama at `http://localhost:11434/v1` and uses `qwen3:4b`.
 
+## LLM provider configuration
+
+`Llm:Provider` accepts `Ollama`, `OpenAI`, or `Foundry` (case-insensitive) and
+defaults to `Ollama`. Only the selected provider is validated and registered;
+invalid configuration fails startup and never silently falls back.
+
+The checked-in defaults contain endpoints, models, and timeouts but no secrets:
+
+```json
+{
+  "Llm": {
+    "Provider": "Ollama",
+    "Ollama": {
+      "Endpoint": "http://localhost:11434/v1",
+      "Model": "qwen3:4b",
+      "TimeoutSeconds": 600
+    },
+    "OpenAI": {
+      "Endpoint": "https://api.openai.com/v1",
+      "Model": "gpt-4.1-mini",
+      "TimeoutSeconds": 120
+    },
+    "Foundry": {
+      "Authentication": "EntraId",
+      "TimeoutSeconds": 120
+    }
+  }
+}
+```
+
+Use environment variables for a temporary provider switch:
+
+```powershell
+# OpenAI
+$env:Llm__Provider = "OpenAI"
+$env:Llm__OpenAI__ApiKey = "<secret>"
+
+# Microsoft Foundry with Microsoft Entra ID
+$env:Llm__Provider = "Foundry"
+$env:Llm__Foundry__Endpoint = "https://<resource>.services.ai.azure.com/openai/v1/"
+$env:Llm__Foundry__Deployment = "<deployment-name>"
+$env:Llm__Foundry__Authentication = "EntraId"
+az login
+```
+
+Or store local secrets with the API project's User Secrets ID:
+
+```powershell
+dotnet user-secrets set "Llm:Provider" "OpenAI" --project src/MediaIntelligence.Api
+dotnet user-secrets set "Llm:OpenAI:ApiKey" "<secret>" --project src/MediaIntelligence.Api
+
+dotnet user-secrets set "Llm:Provider" "Foundry" --project src/MediaIntelligence.Api
+dotnet user-secrets set "Llm:Foundry:Endpoint" "https://<resource>.openai.azure.com/openai/v1/" --project src/MediaIntelligence.Api
+dotnet user-secrets set "Llm:Foundry:Deployment" "<deployment-name>" --project src/MediaIntelligence.Api
+```
+
+Foundry supports `EntraId` (recommended) and `ApiKey`. Entra ID uses
+`DefaultAzureCredential` and requires an authenticated developer identity or
+managed identity with permission to invoke the deployment. For API-key auth,
+set `Llm:Foundry:Authentication` to `ApiKey` and provide
+`Llm:Foundry:ApiKey` through an environment variable or User Secrets.
+
+This integration intentionally accepts only Azure model-inference endpoints
+ending in `/openai/v1/` on `*.openai.azure.com` or
+`*.services.ai.azure.com`. Native Foundry project and agent endpoints use
+different API shapes and are rejected at startup rather than assumed to be
+OpenAI-compatible.
+
 ## API
 
 ### List synthetic media titles
@@ -129,8 +202,8 @@ The success response contract is:
 }
 ```
 
-The agent endpoint requires Ollama. The media-list and deterministic analytics
-endpoints do not make an LLM call.
+The agent endpoint requires the selected provider. The media-list and
+deterministic analytics endpoints do not make an LLM call.
 
 ## Agent tools
 
@@ -174,7 +247,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 33 tests covering:
+The current offline suite contains 42 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
@@ -186,7 +259,8 @@ The current offline suite contains 33 tests covering:
 - The final response boundary, aggregate-only identity evidence, identifier
   non-disclosure, and the `{ "answer": ... }` API contract.
 
-Tests inject fake model text and never call Ollama or OpenAI. See
+Tests inject fake model text and never call Ollama, OpenAI, or Foundry. Provider
+tests validate selection and configuration without sending network requests. See
 [Evaluation](docs/evaluation.md) for scenarios and live-smoke observations.
 
 ## Telemetry
@@ -198,10 +272,20 @@ Each agent request records structured fields for:
 - LLM round count and individual round durations.
 - Tool-call count, tool names, and individual durations.
 - Evidence-verification outcome.
+- Selected provider and model (never endpoint or credentials).
 
 Activities use the source name `MediaIntelligence.Agent`. No exporter is
 configured. Logs intentionally omit prompts, complete model responses, tool
-payloads, device IDs, and audience IDs.
+payloads, device IDs, audience IDs, endpoints, and credentials.
+
+## Manual provider smoke tests
+
+Cloud smoke tests can incur cost and are not part of the offline suite. After
+configuring exactly one provider, run the API and submit the existing agent
+request shown above. Confirm HTTP 200, an analytics tool call, evidence
+verification success, and telemetry fields for the expected provider/model.
+Clear secret environment variables or User Secrets after the test. Never paste
+credentials into request bodies, logs, or tracked settings files.
 
 ## Measured local smoke tests
 
@@ -232,6 +316,10 @@ offline boundary integration test rather than claimed from that capture.
 - One boolean `AdShown` value represents at most one impression per event.
 - Evidence extraction is deterministic text/JSON matching, not semantic proof.
 - The model may be slow on CPU-only Ollama installations.
+- Provider support uses Chat Completions-compatible tool calling. Native
+  Foundry project/agent APIs and provider-specific features are out of scope.
+- OpenAI and Foundry availability, deployment permissions, quotas, latency,
+  and cost depend on the configured cloud account.
 - Activities are not exported or persisted.
 - There is currently no license file; public reuse terms are therefore not
   granted until the repository owner selects a license.
@@ -243,7 +331,8 @@ Potential next steps, not currently implemented:
 - Campaign and time-window dimensions for reach/frequency.
 - Purpose- and policy-aware consent records with history.
 - OpenTelemetry export and dashboards.
-- Configurable Ollama endpoint/model settings.
+- Additional provider-specific integration and contract tests against opt-in
+  test deployments.
 - API-level integration tests with an in-memory host.
 - Additional evaluation fixtures and automated quality thresholds.
 

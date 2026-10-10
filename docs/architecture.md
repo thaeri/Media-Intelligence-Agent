@@ -1,8 +1,9 @@
 # Architecture
 
 The solution is intentionally small and local-first. ASP.NET Core hosts the
-HTTP API, deterministic services calculate every metric, and Ollama supplies
-only natural-language orchestration and summarization.
+HTTP API, deterministic services calculate every metric, and a single
+configuration-selected LLM supplies only natural-language orchestration and
+summarization. Ollama remains the default.
 
 ## Components
 
@@ -11,7 +12,8 @@ flowchart LR
     Client[HTTP client]
     API[ASP.NET Core controllers]
     Agent[MediaAgentService]
-    Ollama[Ollama qwen3:4b]
+    Factory[Validated LLM provider factory]
+    LLM[Ollama / OpenAI / Foundry]
     Repo[SyntheticMediaRepository]
     Content[AudienceAnalytics]
     Identity[IdentityResolutionService]
@@ -23,7 +25,8 @@ flowchart LR
     API --> Agent
     API --> Content
     API --> Repo
-    Agent <--> Ollama
+    Agent --> Factory
+    Factory <--> LLM
     Agent --> Repo
     Agent --> Content
     Agent --> Reach
@@ -37,6 +40,24 @@ flowchart LR
 contains domain models, interfaces, synthetic data, deterministic analytics,
 agent orchestration, evidence review, and telemetry.
 
+## Provider registration and authentication
+
+The composition root binds and validates one `LlmOptions` tree at startup.
+`LlmClientFactory` constructs one singleton OpenAI SDK `ChatClient`, so
+`MediaAgentService` and its tool loop do not branch on providers.
+
+| Provider | Model value | Endpoint | Authentication |
+| --- | --- | --- | --- |
+| Ollama | `qwen3:4b` by default | Local `/v1` compatibility endpoint | Non-secret placeholder required by the client |
+| OpenAI | `gpt-4.1-mini` by default | Official `api.openai.com/v1` | API key from environment or User Secrets |
+| Foundry | Azure deployment name | Azure model inference `/openai/v1/` | `DefaultAzureCredential` or API key |
+
+Foundry endpoint validation is deliberately narrow. It accepts Azure OpenAI or
+Foundry resource inference hosts and rejects native project/agent endpoint
+shapes because those APIs are not interchangeable with Chat Completions.
+Provider, model, endpoint, authentication mode, and timeout are configuration;
+credentials are never placed in checked-in settings or telemetry.
+
 ## Agent request flow
 
 ```mermaid
@@ -45,7 +66,7 @@ sequenceDiagram
     participant A as AgentController
     participant M as MediaAgentService
     participant T as AgentTelemetryService
-    participant L as Ollama qwen3:4b
+    participant L as Selected LLM provider
     participant D as Deterministic tool
     participant E as EvidenceReviewerService
 
@@ -113,8 +134,9 @@ creates the public `{ "answer": ... }` response.
 
 `AgentTelemetryService` emits structured `ILogger` events and activities under
 `MediaIntelligence.Agent`. It records request ID, status, durations, LLM rounds,
-tool names/counts, and evidence outcome. It does not receive or log prompts,
-model responses, tool payloads, device IDs, or audience IDs.
+tool names/counts, provider/model, and evidence outcome. It does not receive or
+log prompts, model responses, tool payloads, endpoints, credentials, device
+IDs, or audience IDs.
 
 No telemetry exporter is configured. Consumers can attach an
 `ActivityListener` or add an exporter later without changing domain logic.

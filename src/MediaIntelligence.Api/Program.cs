@@ -1,7 +1,6 @@
 using MediaIntelligence.Core.Services;
-using OpenAI;
 using OpenAI.Chat;
-using System.ClientModel;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,19 +26,17 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<EvidenceReviewerService>();
 builder.Services.AddScoped<AgentTelemetryService>();
 
-builder.Services.AddSingleton(_ =>
-{
-    var options = new OpenAIClientOptions
-    {
-        Endpoint = new Uri("http://localhost:11434/v1"),
-        NetworkTimeout = TimeSpan.FromMinutes(10)
-    };
-
-    return new ChatClient(
-        model: "qwen3:4b",
-        credential: new ApiKeyCredential("ollama"),
-        options: options);
-});
+builder.Services.AddSingleton<IValidateOptions<LlmOptions>, LlmOptionsValidator>();
+builder.Services.AddOptions<LlmOptions>()
+    .Bind(builder.Configuration.GetSection(LlmOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton(serviceProvider =>
+    LlmClientFactory.Create(
+        serviceProvider.GetRequiredService<IOptions<LlmOptions>>().Value));
+builder.Services.AddSingleton(serviceProvider =>
+    serviceProvider.GetRequiredService<ConfiguredLlmClient>().Client);
+builder.Services.AddSingleton(serviceProvider =>
+    serviceProvider.GetRequiredService<ConfiguredLlmClient>().Metadata);
 
 builder.Services.AddScoped<MediaAgentService>();
 

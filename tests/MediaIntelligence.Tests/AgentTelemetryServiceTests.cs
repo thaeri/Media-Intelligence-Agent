@@ -12,7 +12,9 @@ public sealed class AgentTelemetryServiceTests
         var logger = new CapturingLogger<AgentTelemetryService>();
         var stoppedActivities = new List<Activity>();
         using var listener = CreateListener(stoppedActivities);
-        var service = new AgentTelemetryService(logger);
+        var service = new AgentTelemetryService(
+            logger,
+            new LlmClientMetadata("Ollama", "qwen3:4b", TimeSpan.FromMinutes(10)));
 
         using (var request = service.BeginRequest("request-123"))
         {
@@ -38,6 +40,8 @@ public sealed class AgentTelemetryServiceTests
             stoppedActivities,
             item => item.OperationName == "agent.request");
         Assert.Equal("request-123", activity.GetTagItem("agent.request.id"));
+        Assert.Equal("Ollama", activity.GetTagItem("gen_ai.provider.name"));
+        Assert.Equal("qwen3:4b", activity.GetTagItem("gen_ai.request.model"));
         Assert.Equal("completed", activity.GetTagItem("agent.status"));
         Assert.Equal(1, activity.GetTagItem("agent.llm.rounds"));
         Assert.Equal(1, activity.GetTagItem("agent.tool.calls"));
@@ -62,7 +66,9 @@ public sealed class AgentTelemetryServiceTests
         var logger = new CapturingLogger<AgentTelemetryService>();
         var stoppedActivities = new List<Activity>();
         using var listener = CreateListener(stoppedActivities);
-        var service = new AgentTelemetryService(logger);
+        var service = new AgentTelemetryService(
+            logger,
+            new LlmClientMetadata("OpenAI", "gpt-4.1-mini", TimeSpan.FromMinutes(2)));
 
         using (var request = service.BeginRequest("request-failure"))
         {
