@@ -161,7 +161,7 @@ Available content catalog:
         };
 
         var options = new ChatCompletionOptions();
-        options.MaxOutputTokenCount = 300;
+        options.MaxOutputTokenCount = 1000;
         options.Tools.Add(AnalyticsTool);
         options.Tools.Add(ComparisonTool);
         options.Tools.Add(AudienceIdentityMetricsTool);
