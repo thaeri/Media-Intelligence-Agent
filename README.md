@@ -287,21 +287,41 @@ verification success, and telemetry fields for the expected provider/model.
 Clear secret environment variables or User Secrets after the test. Never paste
 credentials into request bodies, logs, or tracked settings files.
 
-## Measured local smoke tests
+### Provider validation status
 
-These are observations from one Windows development machine running Ollama
-CPU-only, not performance benchmarks:
+| Provider | Offline configuration | Live agent flow | Authentication tested |
+| --- | --- | --- | --- |
+| Ollama | Passed | Passed | Local placeholder credential |
+| OpenAI | Passed | Not run | Not run |
+| Microsoft Foundry | Passed | Passed | Microsoft Entra ID |
+
+The Foundry smoke test exercised startup validation, provider selection, two
+LLM rounds, `get_audience_identity_metrics`, evidence verification, and the
+public response boundary. It used a configured `/openai/v1/` inference endpoint
+without persisting credentials or cloud resource identifiers. OpenAI remains
+offline-tested only; no paid OpenAI request has been made.
+
+## Measured smoke observations
+
+The Ollama rows are observations from one Windows development machine running
+CPU-only. The Foundry row is one cloud-provider observation. These are not
+performance benchmarks:
 
 | Scenario | HTTP | LLM rounds | Tool | Tool time | Total time |
 | --- | ---: | ---: | --- | ---: | ---: |
 | Cross-title completion comparison | 200 | 2 | `compare_content_performance` | 18 ms | 248.8 s |
 | City Stories reach/frequency | 200 | 2 | `get_audience_identity_metrics` | 28.7 ms | 607.7 s |
+| City Stories reach/frequency (Foundry) | 200 | 2 | `get_audience_identity_metrics` | 11.9 ms | 19.24 s |
 
 Both runs completed with evidence verification passing. The identity run
 produced deterministic tool values of reach `2` and frequency `15.5`. Its HTTP
 body could not be retained by the Windows PowerShell 5 smoke client after the
 server returned 200, so final-response privacy is additionally covered by the
 offline boundary integration test rather than claimed from that capture.
+
+The Foundry run returned the same deterministic reach `2` and frequency
+`15.5`, passed evidence verification, and contained no raw device or audience
+identifiers. These observations are single runs, not comparative benchmarks.
 
 ## Limitations
 

@@ -1,7 +1,7 @@
 # Evaluation
 
 Evaluation is split between deterministic offline tests and manually executed
-local Ollama smoke tests. CI runs only the offline suite.
+provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
@@ -86,10 +86,37 @@ receipt, so that response body was not retained. The deterministic offline
 boundary test closes the response-privacy verification gap; the live result is
 not presented as direct body-inspection evidence.
 
+## Live Microsoft Foundry smoke observation
+
+One manual smoke test was run against a configured Microsoft Foundry chat
+deployment using Microsoft Entra ID. Endpoint, tenant, subscription, resource,
+deployment, account, and request identifiers are intentionally not recorded.
+This single-run observation is environment-specific and is not a benchmark.
+
+| Scenario | HTTP | Round 1 | Round 2 | Tool | Tool duration | Total |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| City Stories reach/frequency | 200 | 12.57 s | 6.62 s | `get_audience_identity_metrics` | 11.9 ms | 19.24 s |
+
+The request completed in two LLM rounds with one tool call. Evidence
+verification passed, and the captured response used the deterministic reach
+of `2` and average frequency of `15.5`. Neither the response nor telemetry
+contained raw device or audience identifiers. Telemetry recorded provider and
+model category, durations, counts, and completed outcome without recording
+credentials or cloud resource identifiers.
+
+The initial developer credential selection targeted a different tenant in a
+multi-tenant environment. Explicitly selecting the resource tenant for
+`DefaultAzureCredential` resolved authentication. The first authenticated run
+then exposed an insufficient 300-token completion ceiling for the cloud model;
+raising the existing ceiling to 1,000 allowed the grounded final response to
+complete. Both conditions failed visibly without provider fallback.
+
 ## Known gaps
 
 - No automated end-to-end test hosts the ASP.NET application with a fake
   OpenAI-compatible HTTP server.
+- OpenAI has offline configuration coverage but has not received a paid live
+  smoke test in this repository.
 - No performance baseline, percentile distribution, concurrency test, or GPU
   measurement exists.
 - `ActivitySource` behavior is unit-tested, but no exporter integration is
