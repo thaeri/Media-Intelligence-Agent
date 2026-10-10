@@ -16,6 +16,14 @@ builder.Services.AddScoped<
     MediaIntelligence.Core.Interfaces.IAudienceAnalytics,
     MediaIntelligence.Core.Services.AudienceAnalytics>();
 
+builder.Services.AddScoped<
+    MediaIntelligence.Core.Interfaces.IIdentityResolutionService,
+    IdentityResolutionService>();
+
+builder.Services.AddScoped<
+    MediaIntelligence.Core.Interfaces.IAudienceIdentityAnalytics,
+    AudienceIdentityAnalytics>();
+
 builder.Services.AddScoped<EvidenceReviewerService>();
 builder.Services.AddScoped<AgentTelemetryService>();
 

@@ -10,5 +10,10 @@ namespace MediaIntelligence.Core.Interfaces
         MediaContent? GetContent(Guid contentId);
 
         IReadOnlyList<ViewingEvent> GetViewingEvents(Guid contentId);
+
+        IReadOnlyList<DeviceAudienceAssociation>
+            GetDeviceAudienceAssociations();
+
+        IReadOnlyList<AudienceConsent> GetAudienceConsents();
     }
 }

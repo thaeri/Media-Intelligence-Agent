@@ -113,6 +113,40 @@ public sealed class EvidenceReviewerServiceTests
         Assert.False(result.IsVerified);
     }
 
+    [Fact]
+    public void Review_RejectsAudienceMetricBorrowedFromAnotherMetric()
+    {
+        var result = _reviewer.Review(
+            "City Stories has reach of 1.5.",
+            [AudienceIdentityEvidence]);
+
+        Assert.False(result.IsVerified);
+        Assert.Equal(["1.5"], result.UnsupportedClaims);
+    }
+
+    [Fact]
+    public void Review_RejectsAudienceMetricBorrowedFromAnotherTitle()
+    {
+        var result = _reviewer.Review(
+            "City Stories has reach of 1.",
+            [AudienceIdentityEvidence]);
+
+        Assert.False(result.IsVerified);
+        Assert.Equal(["1"], result.UnsupportedClaims);
+    }
+
+    [Fact]
+    public void Review_AcceptsCorrectAudienceMetricAttribution()
+    {
+        var result = _reviewer.Review(
+            "City Stories has reach of 2 and frequency of 1.5.",
+            [AudienceIdentityEvidence]);
+
+        Assert.True(
+            result.IsVerified,
+            string.Join(", ", result.UnsupportedClaims));
+    }
+
     private static string AnalyticsResult(double completionRate, int sessions) =>
         FormattableString.Invariant($$"""
         {
@@ -138,6 +172,25 @@ public sealed class EvidenceReviewerServiceTests
               "ViewingSessions": 100,
               "CompletionRate": 70,
               "AdExposureRate": 85
+            }
+          ]
+        }
+        """;
+
+    private const string AudienceIdentityEvidence = """
+        {
+          "Results": [
+            {
+              "Title": "City Stories",
+              "Reach": 2,
+              "Frequency": 1.5,
+              "EligibleImpressions": 3
+            },
+            {
+              "Title": "Desert Heroes",
+              "Reach": 1,
+              "Frequency": 3,
+              "EligibleImpressions": 3
             }
           ]
         }

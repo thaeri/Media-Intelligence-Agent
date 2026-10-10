@@ -8,6 +8,7 @@ namespace MediaIntelligence.Core.Models
         DateTime ViewedAt,
         int WatchDurationSeconds,
         bool Completed,
-        bool AdShown
+        bool AdShown,
+        DeviceId? DeviceId = null
     );
 }

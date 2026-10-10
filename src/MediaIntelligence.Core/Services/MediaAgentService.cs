@@ -12,6 +12,7 @@ public sealed class MediaAgentService
     private readonly ChatClient _client;
     private readonly IMediaRepository _repository;
     private readonly IAudienceAnalytics _analytics;
+    private readonly IAudienceIdentityAnalytics _identityAnalytics;
     private readonly EvidenceReviewerService _evidenceReviewer;
     private readonly AgentTelemetryService _telemetry;
 
@@ -54,17 +55,41 @@ public sealed class MediaAgentService
 """)
     );
 
+    private static readonly ChatTool AudienceIdentityMetricsTool =
+        ChatTool.CreateFunctionTool(
+            functionName: "get_audience_identity_metrics",
+            functionDescription:
+                "Get privacy-safe cross-device advertising reach, frequency, " +
+                "coverage and exclusion counts for a media title. Uses only " +
+                "explicit synthetic associations and consented impressions.",
+            functionParameters: BinaryData.FromString("""
+{
+  "type": "object",
+  "properties": {
+    "contentId": {
+      "type": "string",
+      "description": "The GUID of the media content"
+    }
+  },
+  "required": ["contentId"],
+  "additionalProperties": false
+}
+""")
+        );
+
 
     public MediaAgentService(
         ChatClient client,
         IMediaRepository repository,
         IAudienceAnalytics analytics,
+        IAudienceIdentityAnalytics identityAnalytics,
         EvidenceReviewerService evidenceReviewer,
         AgentTelemetryService telemetry)
     {
         _client = client;
         _repository = repository;
         _analytics = analytics;
+        _identityAnalytics = identityAnalytics;
         _evidenceReviewer = evidenceReviewer;
         _telemetry = telemetry;
     }
@@ -121,6 +146,9 @@ three aggregated content-level observations.
 6. When evidence is insufficient, explain what additional
 data would be required.
 7. Keep answers concise and business-oriented.
+8. For reach and frequency, use only the audience identity metrics tool.
+Never expose or request device identifiers. Clearly distinguish viewing
+sessions, exposure events, eligible impressions, reach, and frequency.
 
 Available content catalog:
 {JsonSerializer.Serialize(catalog)}
@@ -136,6 +164,7 @@ Available content catalog:
         options.MaxOutputTokenCount = 300;
         options.Tools.Add(AnalyticsTool);
         options.Tools.Add(ComparisonTool);
+        options.Tools.Add(AudienceIdentityMetricsTool);
         var toolResults = new List<string>();
 
         for (var round = 0; round < 5; round++)
@@ -225,6 +254,11 @@ Available content catalog:
             return CompareContentPerformance();
         }
 
+        if (call.FunctionName == "get_audience_identity_metrics")
+        {
+            return GetAudienceIdentityMetrics(call);
+        }
+
         if (call.FunctionName != "get_content_analytics")
         {
             return JsonSerializer.Serialize(new
@@ -266,6 +300,82 @@ Available content catalog:
                 AdExposureRate =
                     _analytics.GetAdExposureRate(contentId, events),
                 DataSource = "Synthetic viewing events"
+            });
+        }
+        catch (Exception ex) when (
+            ex is JsonException ||
+            ex is KeyNotFoundException ||
+            ex is InvalidOperationException)
+        {
+            return """{"error":"Invalid tool arguments"}""";
+        }
+    }
+
+    private string GetAudienceIdentityMetrics(ChatToolCall call)
+    {
+        try
+        {
+            using var args = JsonDocument.Parse(call.FunctionArguments);
+            var idText = args.RootElement
+                .GetProperty("contentId")
+                .GetString();
+
+            if (!Guid.TryParse(idText, out var contentId))
+            {
+                return """{"error":"Invalid content ID"}""";
+            }
+
+            var content = _repository.GetContent(contentId);
+            if (content is null)
+            {
+                return """{"error":"Content not found"}""";
+            }
+
+            var metrics = _identityAnalytics.GetMetrics(
+                contentId,
+                _repository.GetViewingEvents(contentId),
+                _repository.GetDeviceAudienceAssociations(),
+                _repository.GetAudienceConsents());
+
+            return JsonSerializer.Serialize(new
+            {
+                content.Id,
+                content.Title,
+                metrics.ViewingSessions,
+                metrics.ExposureEvents,
+                metrics.EligibleImpressions,
+                metrics.Reach,
+                metrics.Frequency,
+                metrics.EligibleExposureCoverageRate,
+                Exclusions = new
+                {
+                    MissingDeviceIdExclusions =
+                        metrics.Exclusions.MissingDeviceId,
+                    UnknownDeviceExclusions =
+                        metrics.Exclusions.UnknownDevice,
+                    ConflictExclusions = metrics.Exclusions.Conflict,
+                    ConsentDeniedExclusions =
+                        metrics.Exclusions.ConsentDenied,
+                    ConsentMissingExclusions =
+                        metrics.Exclusions.ConsentMissing
+                },
+                DataSource = "Synthetic viewing events and explicit " +
+                    "pseudonymous associations",
+                Definitions = new
+                {
+                    ViewingSessions = "All viewing events for the title",
+                    ExposureEvents = "Viewing events where AdShown is true",
+                    EligibleImpressions = "Consented, unambiguously resolved " +
+                        "exposure events; at most one impression per event",
+                    Reach = "Distinct eligible pseudonymous audiences",
+                    Frequency = "Eligible impressions divided by reach"
+                },
+                Limitations = new[]
+                {
+                    "Synthetic data only",
+                    "Explicit associations only; no probabilistic matching",
+                    "Unknown, conflicting and non-consenting identities excluded"
+                }
             });
         }
         catch (Exception ex) when (
