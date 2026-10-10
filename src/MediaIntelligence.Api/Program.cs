@@ -23,6 +23,10 @@ builder.Services.AddScoped<
     MediaIntelligence.Core.Interfaces.IAudienceIdentityAnalytics,
     AudienceIdentityAnalytics>();
 
+builder.Services.AddScoped<
+    MediaIntelligence.Core.Interfaces.ICampaignAnalytics,
+    CampaignAnalytics>();
+
 builder.Services.AddScoped<EvidenceReviewerService>();
 builder.Services.AddScoped<AgentTelemetryService>();
 

@@ -18,6 +18,7 @@ flowchart LR
     Content[AudienceAnalytics]
     Identity[IdentityResolutionService]
     Reach[AudienceIdentityAnalytics]
+    Campaign[CampaignAnalytics]
     Evidence[EvidenceReviewerService]
     Telemetry[AgentTelemetryService]
 
@@ -30,8 +31,11 @@ flowchart LR
     Agent --> Repo
     Agent --> Content
     Agent --> Reach
+    Agent --> Campaign
     Reach --> Identity
     Reach --> Repo
+    Campaign --> Identity
+    Campaign --> Repo
     Agent --> Evidence
     Agent --> Telemetry
 ```
@@ -121,6 +125,22 @@ reach; frequency is eligible impressions divided by reach.
 The agent tool exposes only aggregate metrics, coverage, exclusions,
 definitions, and limitations. Device and audience identifiers never enter the
 LLM tool result.
+
+## Campaign-aware measurement
+
+Campaigns and ad impressions form a separate synthetic domain from viewing
+events. `CampaignAnalytics` filters impressions by campaign/content and a
+half-open UTC interval, then delegates every identity decision to the unchanged
+`IdentityResolutionService`. It calculates total and eligible impressions,
+deduplicated eligible reach, average frequency, coverage, and aggregate
+exclusions.
+
+`get_campaign_performance` returns one campaign result;
+`compare_campaign_performance` returns all campaign results. Both accept
+optional UTC boundaries, reject invalid ranges, and expose no device or
+audience identifiers. `EvidenceReviewerService` treats campaign names as
+cohorts and keeps total impressions distinct from eligible impressions, so a
+number from another campaign or metric cannot support a claim.
 
 ## Evidence boundary
 

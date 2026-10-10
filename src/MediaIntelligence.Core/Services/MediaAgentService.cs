@@ -1,7 +1,9 @@
 
 using System.Text.Json;
 using System.Diagnostics;
+using System.Globalization;
 using MediaIntelligence.Core.Interfaces;
+using MediaIntelligence.Core.Models;
 using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 
@@ -13,6 +15,7 @@ public sealed class MediaAgentService
     private readonly IMediaRepository _repository;
     private readonly IAudienceAnalytics _analytics;
     private readonly IAudienceIdentityAnalytics _identityAnalytics;
+    private readonly ICampaignAnalytics _campaignAnalytics;
     private readonly EvidenceReviewerService _evidenceReviewer;
     private readonly AgentTelemetryService _telemetry;
 
@@ -77,12 +80,69 @@ public sealed class MediaAgentService
 """)
         );
 
+    private static readonly ChatTool CampaignPerformanceTool =
+        ChatTool.CreateFunctionTool(
+            functionName: "get_campaign_performance",
+            functionDescription:
+                "Get consent-aware reach, frequency, coverage and exclusion " +
+                "metrics for one synthetic advertising campaign.",
+            functionParameters: BinaryData.FromString("""
+{
+  "type": "object",
+  "properties": {
+    "campaignId": {
+      "type": "string",
+      "description": "The GUID of the campaign"
+    },
+    "startUtc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional inclusive UTC start boundary"
+    },
+    "endUtc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional exclusive UTC end boundary"
+    }
+  },
+  "required": ["campaignId"],
+  "additionalProperties": false
+}
+"""));
+
+    private static readonly ChatTool CampaignComparisonTool =
+        ChatTool.CreateFunctionTool(
+            functionName: "compare_campaign_performance",
+            functionDescription:
+                "Compare consent-aware reach, frequency, coverage and " +
+                "impressions across all synthetic advertising campaigns.",
+            functionParameters: BinaryData.FromString("""
+{
+  "type": "object",
+  "properties": {
+    "startUtc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional inclusive UTC start boundary"
+    },
+    "endUtc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional exclusive UTC end boundary"
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}
+"""));
+
 
     public MediaAgentService(
         ChatClient client,
         IMediaRepository repository,
         IAudienceAnalytics analytics,
         IAudienceIdentityAnalytics identityAnalytics,
+        ICampaignAnalytics campaignAnalytics,
         EvidenceReviewerService evidenceReviewer,
         AgentTelemetryService telemetry)
     {
@@ -90,6 +150,7 @@ public sealed class MediaAgentService
         _repository = repository;
         _analytics = analytics;
         _identityAnalytics = identityAnalytics;
+        _campaignAnalytics = campaignAnalytics;
         _evidenceReviewer = evidenceReviewer;
         _telemetry = telemetry;
     }
@@ -131,6 +192,16 @@ public sealed class MediaAgentService
         var catalog = _repository.GetContents()
             .Select(c => new { c.Id, c.Title, c.Genre })
             .ToArray();
+        var campaignCatalog = _repository.GetCampaigns()
+            .Select(campaign => new
+            {
+                campaign.Id,
+                campaign.Name,
+                campaign.ContentId,
+                campaign.StartsAtUtc,
+                campaign.EndsAtUtc
+            })
+            .ToArray();
 
         var instructions = $"""
 You are a media intelligence analyst working with synthetic OTT data.
@@ -149,9 +220,14 @@ data would be required.
 8. For reach and frequency, use only the audience identity metrics tool.
 Never expose or request device identifiers. Clearly distinguish viewing
 sessions, exposure events, eligible impressions, reach, and frequency.
+9. For campaign questions, use only campaign tools. Treat UTC start as
+inclusive and UTC end as exclusive. Never expose identity identifiers.
 
 Available content catalog:
 {JsonSerializer.Serialize(catalog)}
+
+Available campaign catalog:
+{JsonSerializer.Serialize(campaignCatalog)}
 """;
 
         var messages = new List<ChatMessage>
@@ -165,6 +241,8 @@ Available content catalog:
         options.Tools.Add(AnalyticsTool);
         options.Tools.Add(ComparisonTool);
         options.Tools.Add(AudienceIdentityMetricsTool);
+        options.Tools.Add(CampaignPerformanceTool);
+        options.Tools.Add(CampaignComparisonTool);
         var toolResults = new List<string>();
 
         for (var round = 0; round < 5; round++)
@@ -255,6 +333,16 @@ Available content catalog:
         if (call.FunctionName == "get_audience_identity_metrics")
         {
             return GetAudienceIdentityMetrics(call);
+        }
+
+        if (call.FunctionName == "get_campaign_performance")
+        {
+            return GetCampaignPerformance(call);
+        }
+
+        if (call.FunctionName == "compare_campaign_performance")
+        {
+            return CompareCampaignPerformance(call);
         }
 
         if (call.FunctionName != "get_content_analytics")
@@ -429,4 +517,249 @@ Available content catalog:
             Results = results
         });
     }
+
+    private string GetCampaignPerformance(ChatToolCall call)
+    {
+        try
+        {
+            using var args = JsonDocument.Parse(call.FunctionArguments);
+            var idText = args.RootElement.GetProperty("campaignId").GetString();
+            if (!Guid.TryParse(idText, out var campaignId))
+            {
+                return """{"error":"Invalid campaign ID"}""";
+            }
+
+            if (!TryReadDateRange(
+                    args.RootElement,
+                    out var startUtc,
+                    out var endUtc,
+                    out var error))
+            {
+                return JsonSerializer.Serialize(new { error });
+            }
+
+            return GetCampaignPerformance(campaignId, startUtc, endUtc);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or KeyNotFoundException)
+        {
+            return """{"error":"Invalid tool arguments"}""";
+        }
+    }
+
+    internal string GetCampaignPerformance(
+        Guid campaignId,
+        DateTime? startUtc = null,
+        DateTime? endUtc = null)
+    {
+        var campaign = _repository.GetCampaign(campaignId);
+        if (campaign is null)
+        {
+            return """{"error":"Campaign not found"}""";
+        }
+
+        try
+        {
+            var result = _campaignAnalytics.GetPerformance(
+                campaign,
+                _repository.GetAdImpressions(campaign.Id),
+                _repository.GetDeviceAudienceAssociations(),
+                _repository.GetAudienceConsents(),
+                startUtc,
+                endUtc);
+            var content = _repository.GetContent(campaign.ContentId);
+            return SerializeCampaignResult(result, content?.Title);
+        }
+        catch (ArgumentException exception)
+        {
+            return JsonSerializer.Serialize(new { error = exception.Message });
+        }
+    }
+
+    private string CompareCampaignPerformance(ChatToolCall call)
+    {
+        try
+        {
+            using var args = JsonDocument.Parse(call.FunctionArguments);
+            if (!TryReadDateRange(
+                    args.RootElement,
+                    out var startUtc,
+                    out var endUtc,
+                    out var error))
+            {
+                return JsonSerializer.Serialize(new { error });
+            }
+
+            return CompareCampaignPerformance(startUtc, endUtc);
+        }
+        catch (Exception exception) when (
+            exception is JsonException or ArgumentException)
+        {
+            return JsonSerializer.Serialize(new { error = exception.Message });
+        }
+    }
+
+    internal string CompareCampaignPerformance(
+        DateTime? startUtc = null,
+        DateTime? endUtc = null)
+    {
+        try
+        {
+            var results = _repository.GetCampaigns()
+                .Select(campaign =>
+                {
+                    var result = _campaignAnalytics.GetPerformance(
+                        campaign,
+                        _repository.GetAdImpressions(campaign.Id),
+                        _repository.GetDeviceAudienceAssociations(),
+                        _repository.GetAudienceConsents(),
+                        startUtc,
+                        endUtc);
+                    var title = _repository.GetContent(campaign.ContentId)?.Title;
+                    return new { Campaign = campaign, Result = result, Title = title };
+                })
+                .OrderByDescending(item => item.Result.Metrics.Reach)
+                .ThenBy(item => item.Campaign.Name)
+                .Select(item => CreateCampaignResult(item.Result, item.Title))
+                .ToArray();
+
+            return JsonSerializer.Serialize(new
+            {
+                DataSource = "Synthetic campaign impressions and explicit " +
+                    "pseudonymous associations",
+                Results = results,
+                Definitions = CampaignMetricDefinitions,
+                Limitations = CampaignMetricLimitations
+            });
+        }
+        catch (ArgumentException exception)
+        {
+            return JsonSerializer.Serialize(new { error = exception.Message });
+        }
+    }
+
+    private static string SerializeCampaignResult(
+        CampaignPerformanceResult result,
+        string? contentTitle) =>
+        JsonSerializer.Serialize(new
+        {
+            DataSource = "Synthetic campaign impressions and explicit " +
+                "pseudonymous associations",
+            Result = CreateCampaignResult(result, contentTitle),
+            Definitions = CampaignMetricDefinitions,
+            Limitations = CampaignMetricLimitations
+        });
+
+    private static object CreateCampaignResult(
+        CampaignPerformanceResult result,
+        string? contentTitle) =>
+        new
+        {
+            CampaignId = result.Campaign.Id,
+            CampaignName = result.Campaign.Name,
+            ContentId = result.Campaign.ContentId,
+            ContentTitle = contentTitle,
+            result.EffectiveStartUtc,
+            result.EffectiveEndUtc,
+            Metrics = new
+            {
+                result.Metrics.TotalImpressions,
+                result.Metrics.EligibleImpressions,
+                result.Metrics.Reach,
+                result.Metrics.Frequency,
+                result.Metrics.EligibleExposureCoverageRate
+            },
+            Exclusions = new
+            {
+                MissingDeviceIdExclusions =
+                    result.Metrics.Exclusions.MissingDeviceId,
+                UnknownDeviceExclusions =
+                    result.Metrics.Exclusions.UnknownDevice,
+                ConflictExclusions = result.Metrics.Exclusions.Conflict,
+                ConsentDeniedExclusions =
+                    result.Metrics.Exclusions.ConsentDenied,
+                ConsentMissingExclusions =
+                    result.Metrics.Exclusions.ConsentMissing
+            }
+        };
+
+    private static bool TryReadDateRange(
+        JsonElement args,
+        out DateTime? startUtc,
+        out DateTime? endUtc,
+        out string? error)
+    {
+        startUtc = null;
+        endUtc = null;
+        error = null;
+
+        if (!TryReadUtcBoundary(args, "startUtc", out startUtc) ||
+            !TryReadUtcBoundary(args, "endUtc", out endUtc))
+        {
+            error = "Date boundaries must be ISO 8601 UTC values.";
+            return false;
+        }
+
+        if (startUtc.HasValue && endUtc.HasValue && startUtc >= endUtc)
+        {
+            error = "The UTC start boundary must be earlier than the end boundary.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryReadUtcBoundary(
+        JsonElement args,
+        string propertyName,
+        out DateTime? value)
+    {
+        value = null;
+        if (!args.TryGetProperty(propertyName, out var property))
+        {
+            return true;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var text = property.GetString();
+        var hasUtcDesignator = text is not null &&
+            (text.EndsWith('Z') || text.EndsWith("+00:00"));
+        if (!hasUtcDesignator ||
+            !DateTimeOffset.TryParse(
+                text,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var parsed) ||
+            parsed.Offset != TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        value = parsed.UtcDateTime;
+        return true;
+    }
+
+    private static readonly object CampaignMetricDefinitions = new
+    {
+        TotalImpressions = "All campaign impression records in the effective " +
+            "half-open UTC interval [start, end)",
+        EligibleImpressions = "Impressions with an explicit, unambiguous " +
+            "device association and granted audience consent",
+        Reach = "Distinct eligible pseudonymous audiences",
+        Frequency = "Eligible impressions divided by reach; zero when reach is zero",
+        EligibleExposureCoverageRate = "Eligible impressions divided by total " +
+            "impressions, multiplied by 100; zero when total is zero"
+    };
+
+    private static readonly string[] CampaignMetricLimitations =
+    [
+        "Synthetic campaign data only",
+        "Campaign start is inclusive and end is exclusive",
+        "Explicit identity associations only; no probabilistic matching",
+        "Unknown, conflicting and non-consenting identities are excluded"
+    ];
 }

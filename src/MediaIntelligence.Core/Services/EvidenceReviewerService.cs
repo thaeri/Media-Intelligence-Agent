@@ -113,6 +113,13 @@ public sealed partial class EvidenceReviewerService
             title = titleElement.GetString();
         }
 
+        if (element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty("CampaignName", out var campaignElement) &&
+            campaignElement.ValueKind == JsonValueKind.String)
+        {
+            title = campaignElement.GetString();
+        }
+
         if (element.ValueKind == JsonValueKind.Number &&
             element.TryGetDouble(out var number))
         {
@@ -290,6 +297,7 @@ public sealed partial class EvidenceReviewerService
             "adexposurerate" => "ad_exposure_rate",
             "viewingsessions" => "viewing_sessions",
             "exposureevents" => "exposure_events",
+            "totalimpressions" => "total_impressions",
             "eligibleimpressions" => "eligible_impressions",
             "reach" => "reach",
             "frequency" => "frequency",
@@ -330,6 +338,7 @@ public sealed partial class EvidenceReviewerService
         ("viewing sessions", "viewing_sessions"),
         ("sessions", "viewing_sessions"),
         ("exposure events", "exposure_events"),
+        ("total impressions", "total_impressions"),
         ("eligible impressions", "eligible_impressions"),
         ("impressions", "eligible_impressions"),
         ("missing device", "missing_device"),

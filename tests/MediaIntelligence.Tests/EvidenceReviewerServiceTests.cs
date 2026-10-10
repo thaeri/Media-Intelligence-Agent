@@ -147,6 +147,41 @@ public sealed class EvidenceReviewerServiceTests
             string.Join(", ", result.UnsupportedClaims));
     }
 
+    [Fact]
+    public void Review_RejectsMetricAttributedToWrongCampaign()
+    {
+        var result = _reviewer.Review(
+            "City Stories Launch has 6 eligible impressions.",
+            [CampaignComparisonEvidence]);
+
+        Assert.False(result.IsVerified);
+        Assert.Equal(["6"], result.UnsupportedClaims);
+    }
+
+    [Fact]
+    public void Review_RejectsTotalImpressionsBorrowedAsEligibleImpressions()
+    {
+        var result = _reviewer.Review(
+            "City Stories Launch has 10 eligible impressions.",
+            [CampaignComparisonEvidence]);
+
+        Assert.False(result.IsVerified);
+        Assert.Equal(["10"], result.UnsupportedClaims);
+    }
+
+    [Fact]
+    public void Review_AcceptsCorrectCampaignComparisonAttribution()
+    {
+        var result = _reviewer.Review(
+            "City Stories Launch has frequency of 2.5, while Desert Heroes " +
+            "Encore has frequency of 3.",
+            [CampaignComparisonEvidence]);
+
+        Assert.True(
+            result.IsVerified,
+            string.Join(", ", result.UnsupportedClaims));
+    }
+
     private static string AnalyticsResult(double completionRate, int sessions) =>
         FormattableString.Invariant($$"""
         {
@@ -191,6 +226,33 @@ public sealed class EvidenceReviewerServiceTests
               "Reach": 1,
               "Frequency": 3,
               "EligibleImpressions": 3
+            }
+          ]
+        }
+        """;
+
+    private const string CampaignComparisonEvidence = """
+        {
+          "Results": [
+            {
+              "CampaignName": "City Stories Launch",
+              "Metrics": {
+                "TotalImpressions": 10,
+                "EligibleImpressions": 5,
+                "Reach": 2,
+                "Frequency": 2.5,
+                "EligibleExposureCoverageRate": 50
+              }
+            },
+            {
+              "CampaignName": "Desert Heroes Encore",
+              "Metrics": {
+                "TotalImpressions": 10,
+                "EligibleImpressions": 6,
+                "Reach": 2,
+                "Frequency": 3,
+                "EligibleExposureCoverageRate": 60
+              }
             }
           ]
         }

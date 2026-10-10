@@ -23,6 +23,8 @@ matching.
 - Default-deny consent handling for missing, denied, conflicting, or unknown
   identity records.
 - Advertising reach, average frequency, coverage, and exclusion metrics.
+- Campaign-aware reach and frequency over explicit synthetic ad impressions
+  with optional UTC windows.
 - Structured request, LLM-round, and tool-call telemetry using `ILogger` and
   `System.Diagnostics.ActivitySource`.
 - Offline evaluation and regression tests that never call Ollama or OpenAI.
@@ -45,6 +47,8 @@ Ollama | OpenAI API | Microsoft Foundry model inference
 See [Architecture](docs/architecture.md) for the component diagram and request
 flow. Audience metric definitions are documented in
 [Privacy-safe audience identity metrics](docs/audience-identity-metrics.md).
+Campaign definitions are documented in
+[Campaign-aware audience metrics](docs/campaign-metrics.md).
 
 ## Technology stack
 
@@ -212,6 +216,8 @@ deterministic analytics endpoints do not make an LLM call.
 | `get_content_analytics` | Viewing sessions, completion rate, and ad-exposure rate for one title. |
 | `compare_content_performance` | Completion and advertising-exposure comparison across all titles. |
 | `get_audience_identity_metrics` | Aggregate cross-device reach, frequency, coverage, and exclusion counts for one title. |
+| `get_campaign_performance` | Consent-aware impression, reach, frequency, coverage, and exclusions for one campaign and optional UTC window. |
+| `compare_campaign_performance` | Aggregate comparison across synthetic campaigns for an optional UTC window. |
 
 Tool results use synthetic aggregates. The audience identity tool never returns
 raw `DeviceId` or `AudienceId` values to the model.
@@ -247,7 +253,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 42 tests covering:
+The current offline suite contains 55 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
@@ -258,6 +264,9 @@ The current offline suite contains 42 tests covering:
 - Telemetry completion, failure, and timeout states.
 - The final response boundary, aggregate-only identity evidence, identifier
   non-disclosure, and the `{ "answer": ... }` API contract.
+- Campaign filtering, cross-device deduplication, consent exclusions, UTC
+  boundaries, zero denominators, unknown campaigns, evidence attribution,
+  identifier non-disclosure, and API serialization.
 
 Tests inject fake model text and never call Ollama, OpenAI, or Foundry. Provider
 tests validate selection and configuration without sending network requests. See
@@ -331,8 +340,11 @@ identifiers. These observations are single runs, not comparative benchmarks.
   resolution.
 - Consent is a current synthetic snapshot without policy, purpose, region, or
   historical versioning.
-- Reach/frequency has no campaign, creative, or configurable time-window
-  dimension.
+- Viewing-event reach/frequency has no campaign dimension; campaign analytics
+  supplies campaign and optional UTC-window dimensions over separate impression
+  records.
+- Campaign analytics has no advertiser, budget, creative, placement,
+  conversion, revenue, or consent-history dimensions.
 - One boolean `AdShown` value represents at most one impression per event.
 - Evidence extraction is deterministic text/JSON matching, not semantic proof.
 - The model may be slow on CPU-only Ollama installations.
@@ -348,7 +360,7 @@ identifiers. These observations are single runs, not comparative benchmarks.
 
 Potential next steps, not currently implemented:
 
-- Campaign and time-window dimensions for reach/frequency.
+- Advertiser, creative, placement, budget, conversion, and revenue dimensions.
 - Purpose- and policy-aware consent records with history.
 - OpenTelemetry export and dashboards.
 - Additional provider-specific integration and contract tests against opt-in

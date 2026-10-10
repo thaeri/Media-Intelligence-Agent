@@ -5,7 +5,7 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The repository currently contains 42 xUnit tests. They do not call Ollama,
+The repository currently contains 55 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 
 ### Deterministic analytics
@@ -63,6 +63,17 @@ method. It verifies:
   fail validation.
 - Unsupported provider values and out-of-range timeouts are rejected.
 - Provider tests only resolve configuration metadata and never send requests.
+
+### Campaign analytics
+
+- Campaign/content filtering and multi-device audience deduplication.
+- Granted, denied, missing, unknown, conflicting, and missing-device outcomes.
+- Inclusive UTC start and exclusive UTC end boundaries.
+- Zero-total and zero-reach denominator behavior.
+- Deterministic unknown-campaign and invalid-range errors.
+- Wrong-campaign and wrong-metric evidence attribution.
+- Aggregate-only tool payloads, identifier non-disclosure, and unchanged
+  `{ "answer": ... }` serialization.
 
 ## Live Ollama smoke observations
 
@@ -124,7 +135,9 @@ complete. Both conditions failed visibly without provider fallback.
 - Evidence matching is deterministic and lexical; it does not prove semantic
   equivalence beyond supported numeric, metric, and title patterns.
 - Synthetic consent has no time, purpose, policy, or jurisdiction dimension.
-- Reach/frequency is not segmented by campaign, creative, or time window.
+- Campaign measurement supports campaign and optional UTC-window segmentation,
+  but no creative, placement, budget, conversion, revenue, or advertiser
+  dimension.
 
 ## Reproduce offline evaluation
 

@@ -15,5 +15,11 @@ namespace MediaIntelligence.Core.Interfaces
             GetDeviceAudienceAssociations();
 
         IReadOnlyList<AudienceConsent> GetAudienceConsents();
+
+        IReadOnlyList<Campaign> GetCampaigns();
+
+        Campaign? GetCampaign(Guid campaignId);
+
+        IReadOnlyList<AdImpression> GetAdImpressions(Guid campaignId);
     }
 }

@@ -17,6 +17,7 @@ public sealed class AgentFinalResponseIntegrationTests
             repository,
             new AudienceAnalytics(),
             new AudienceIdentityAnalytics(new IdentityResolutionService()),
+            new CampaignAnalytics(new IdentityResolutionService()),
             evidenceReviewer,
             telemetry: null!);
         var content = Assert.Single(
