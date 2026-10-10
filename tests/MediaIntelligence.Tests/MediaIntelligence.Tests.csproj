@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MediaIntelligence.Core\MediaIntelligence.Core.csproj" />
+    <ProjectReference Include="..\..\src\MediaIntelligence.Api\MediaIntelligence.Api.csproj" />
   </ItemGroup>
 
 </Project>

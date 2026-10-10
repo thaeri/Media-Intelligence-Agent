@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace MediaIntelligence.Api.Controllers
 {
     public sealed record AskRequest(string Question);
+    public sealed record AskResponse(string Answer);
 
     [ApiController]
     [Route("api/agent")]
@@ -28,7 +29,7 @@ namespace MediaIntelligence.Api.Controllers
                 request.Question,
                 cancellationToken);
 
-            return Ok(new { answer });
+            return Ok(new AskResponse(answer));
         }
     }
 }

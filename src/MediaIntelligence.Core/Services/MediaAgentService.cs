@@ -198,12 +198,10 @@ Available content catalog:
                         .Where(c => c.Text is not null)
                         .Select(c => c.Text));
 
-                var review = _evidenceReviewer.Review(response, toolResults);
-                var verifiedResponse = _evidenceReviewer
-                    .CreateVerifiedResponse(response, review);
+                var finalized = FinalizeResponse(response, toolResults);
 
-                telemetry.Complete(review.IsVerified);
-                return verifiedResponse;
+                telemetry.Complete(finalized.Review.IsVerified);
+                return finalized.Response;
             }
 
             if (completion.FinishReason !=
@@ -311,6 +309,18 @@ Available content catalog:
         }
     }
 
+    internal (string Response, EvidenceReviewResult Review) FinalizeResponse(
+        string modelResponse,
+        IEnumerable<string> toolResults)
+    {
+        var review = _evidenceReviewer.Review(modelResponse, toolResults);
+        var response = _evidenceReviewer.CreateVerifiedResponse(
+            modelResponse,
+            review);
+
+        return (response, review);
+    }
+
     private string GetAudienceIdentityMetrics(ChatToolCall call)
     {
         try
@@ -325,58 +335,7 @@ Available content catalog:
                 return """{"error":"Invalid content ID"}""";
             }
 
-            var content = _repository.GetContent(contentId);
-            if (content is null)
-            {
-                return """{"error":"Content not found"}""";
-            }
-
-            var metrics = _identityAnalytics.GetMetrics(
-                contentId,
-                _repository.GetViewingEvents(contentId),
-                _repository.GetDeviceAudienceAssociations(),
-                _repository.GetAudienceConsents());
-
-            return JsonSerializer.Serialize(new
-            {
-                content.Id,
-                content.Title,
-                metrics.ViewingSessions,
-                metrics.ExposureEvents,
-                metrics.EligibleImpressions,
-                metrics.Reach,
-                metrics.Frequency,
-                metrics.EligibleExposureCoverageRate,
-                Exclusions = new
-                {
-                    MissingDeviceIdExclusions =
-                        metrics.Exclusions.MissingDeviceId,
-                    UnknownDeviceExclusions =
-                        metrics.Exclusions.UnknownDevice,
-                    ConflictExclusions = metrics.Exclusions.Conflict,
-                    ConsentDeniedExclusions =
-                        metrics.Exclusions.ConsentDenied,
-                    ConsentMissingExclusions =
-                        metrics.Exclusions.ConsentMissing
-                },
-                DataSource = "Synthetic viewing events and explicit " +
-                    "pseudonymous associations",
-                Definitions = new
-                {
-                    ViewingSessions = "All viewing events for the title",
-                    ExposureEvents = "Viewing events where AdShown is true",
-                    EligibleImpressions = "Consented, unambiguously resolved " +
-                        "exposure events; at most one impression per event",
-                    Reach = "Distinct eligible pseudonymous audiences",
-                    Frequency = "Eligible impressions divided by reach"
-                },
-                Limitations = new[]
-                {
-                    "Synthetic data only",
-                    "Explicit associations only; no probabilistic matching",
-                    "Unknown, conflicting and non-consenting identities excluded"
-                }
-            });
+            return GetAudienceIdentityMetrics(contentId);
         }
         catch (Exception ex) when (
             ex is JsonException ||
@@ -385,6 +344,62 @@ Available content catalog:
         {
             return """{"error":"Invalid tool arguments"}""";
         }
+    }
+
+    internal string GetAudienceIdentityMetrics(Guid contentId)
+    {
+        var content = _repository.GetContent(contentId);
+        if (content is null)
+        {
+            return """{"error":"Content not found"}""";
+        }
+
+        var metrics = _identityAnalytics.GetMetrics(
+            contentId,
+            _repository.GetViewingEvents(contentId),
+            _repository.GetDeviceAudienceAssociations(),
+            _repository.GetAudienceConsents());
+
+        return JsonSerializer.Serialize(new
+        {
+            content.Id,
+            content.Title,
+            metrics.ViewingSessions,
+            metrics.ExposureEvents,
+            metrics.EligibleImpressions,
+            metrics.Reach,
+            metrics.Frequency,
+            metrics.EligibleExposureCoverageRate,
+            Exclusions = new
+            {
+                MissingDeviceIdExclusions =
+                    metrics.Exclusions.MissingDeviceId,
+                UnknownDeviceExclusions =
+                    metrics.Exclusions.UnknownDevice,
+                ConflictExclusions = metrics.Exclusions.Conflict,
+                ConsentDeniedExclusions =
+                    metrics.Exclusions.ConsentDenied,
+                ConsentMissingExclusions =
+                    metrics.Exclusions.ConsentMissing
+            },
+            DataSource = "Synthetic viewing events and explicit " +
+                "pseudonymous associations",
+            Definitions = new
+            {
+                ViewingSessions = "All viewing events for the title",
+                ExposureEvents = "Viewing events where AdShown is true",
+                EligibleImpressions = "Consented, unambiguously resolved " +
+                    "exposure events; at most one impression per event",
+                Reach = "Distinct eligible pseudonymous audiences",
+                Frequency = "Eligible impressions divided by reach"
+            },
+            Limitations = new[]
+            {
+                "Synthetic data only",
+                "Explicit associations only; no probabilistic matching",
+                "Unknown, conflicting and non-consenting identities excluded"
+            }
+        });
     }
 
     private string CompareContentPerformance()
