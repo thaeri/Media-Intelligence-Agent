@@ -1,0 +1,52 @@
+# .NET build outputs
+**/bin/
+**/obj/
+artifacts/
+.artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+
+# Visual Studio Code and JetBrains IDEs
+.vscode/
+.idea/
+*.sln.iml
+
+# Local application settings and secrets
+appsettings.Local.json
+appsettings.*.Local.json
+appsettings.*.local.json
+secrets.json
+**/secrets.json
+.env
+.env.*
+!.env.example
+
+# Certificates, keys, and local databases
+*.pfx
+*.p12
+*.pem
+*.key
+*.db
+*.db-shm
+*.db-wal
+
+# Coverage, logs, and temporary files
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.trx
+*.log
+*.tmp
+*.bak
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

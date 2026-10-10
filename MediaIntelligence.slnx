@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MediaIntelligence.Api/MediaIntelligence.Api.csproj" />
+    <Project Path="src/MediaIntelligence.Core/MediaIntelligence.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MediaIntelligence.Tests/MediaIntelligence.Tests.csproj" />
+  </Folder>
+</Solution>
