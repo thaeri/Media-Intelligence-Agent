@@ -1,0 +1,307 @@
+
+using System.Text.Json;
+using System.Diagnostics;
+using MediaIntelligence.Core.Interfaces;
+using Microsoft.Extensions.Logging;
+using OpenAI.Chat;
+
+namespace MediaIntelligence.Core.Services;
+
+public sealed class MediaAgentService
+{
+    private readonly ChatClient _client;
+    private readonly IMediaRepository _repository;
+    private readonly IAudienceAnalytics _analytics;
+    private readonly EvidenceReviewerService _evidenceReviewer;
+    private readonly AgentTelemetryService _telemetry;
+
+    private static readonly ChatTool AnalyticsTool =
+        ChatTool.CreateFunctionTool(
+            functionName: "get_content_analytics",
+            functionDescription:
+                "Get audience metrics for a media title. " +
+                "Returns viewing sessions, completion rate and ad exposure rate.",
+            functionParameters: BinaryData.FromString("""
+    {
+      "type": "object",
+      "properties": {
+        "contentId": {
+          "type": "string",
+          "description": "The GUID of the media content"
+        }
+      },
+      "required": ["contentId"],
+      "additionalProperties": false
+    }
+    """)
+        );
+
+
+    private static readonly ChatTool ComparisonTool =
+    ChatTool.CreateFunctionTool(
+        functionName: "compare_content_performance",
+        functionDescription:
+            "Compare completion rate and advertising exposure " +
+            "across all media titles. Use this tool for rankings " +
+            "or comparisons between titles.",
+        functionParameters: BinaryData.FromString("""
+{
+  "type": "object",
+  "properties": {},
+  "required": [],
+  "additionalProperties": false
+}
+""")
+    );
+
+
+    public MediaAgentService(
+        ChatClient client,
+        IMediaRepository repository,
+        IAudienceAnalytics analytics,
+        EvidenceReviewerService evidenceReviewer,
+        AgentTelemetryService telemetry)
+    {
+        _client = client;
+        _repository = repository;
+        _analytics = analytics;
+        _evidenceReviewer = evidenceReviewer;
+        _telemetry = telemetry;
+    }
+
+    public async Task<string> AskAsync(
+        string question,
+        CancellationToken cancellationToken = default)
+    {
+        var requestId = Activity.Current?.TraceId.ToString();
+        if (string.IsNullOrEmpty(requestId))
+        {
+            requestId = Guid.NewGuid().ToString("N");
+        }
+
+        using var telemetry = _telemetry.BeginRequest(requestId);
+
+        try
+        {
+            return await AskCoreAsync(question, telemetry, cancellationToken);
+        }
+        catch (OperationCanceledException exception)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            telemetry.Fail(exception, timedOut: true);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            telemetry.Fail(exception, timedOut: false);
+            throw;
+        }
+    }
+
+    private async Task<string> AskCoreAsync(
+        string question,
+        AgentRequestTelemetry telemetry,
+        CancellationToken cancellationToken)
+    {
+        var catalog = _repository.GetContents()
+            .Select(c => new { c.Id, c.Title, c.Genre })
+            .ToArray();
+
+        var instructions = $"""
+You are a media intelligence analyst working with synthetic OTT data.
+
+Rules:
+1. Always call the appropriate analytics tool before making
+numerical claims.
+2. Never invent metrics, rankings, or evidence.
+3. Distinguish observations from hypotheses.
+4. Do not claim statistical correlation or causation from
+three aggregated content-level observations.
+5. State that the dataset is synthetic.
+6. When evidence is insufficient, explain what additional
+data would be required.
+7. Keep answers concise and business-oriented.
+
+Available content catalog:
+{JsonSerializer.Serialize(catalog)}
+""";
+
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage(instructions),
+            new UserChatMessage(question)
+        };
+
+        var options = new ChatCompletionOptions();
+        options.MaxOutputTokenCount = 300;
+        options.Tools.Add(AnalyticsTool);
+        options.Tools.Add(ComparisonTool);
+        var toolResults = new List<string>();
+
+        for (var round = 0; round < 5; round++)
+        {
+            var roundNumber = round + 1;
+            var roundStartedAt = Stopwatch.GetTimestamp();
+            using var roundActivity = telemetry.StartLlmRound(roundNumber);
+            ChatCompletion completion;
+
+            try
+            {
+                completion = await _client.CompleteChatAsync(
+                    messages,
+                    options,
+                    cancellationToken);
+            }
+            finally
+            {
+                telemetry.RecordLlmRound(
+                    roundNumber,
+                    Stopwatch.GetElapsedTime(roundStartedAt),
+                    "finished");
+            }
+
+            if (completion.FinishReason ==
+                ChatFinishReason.Stop)
+            {
+                var response = string.Join(
+                    "\n",
+                    completion.Content
+                        .Where(c => c.Text is not null)
+                        .Select(c => c.Text));
+
+                var review = _evidenceReviewer.Review(response, toolResults);
+                var verifiedResponse = _evidenceReviewer
+                    .CreateVerifiedResponse(response, review);
+
+                telemetry.Complete(review.IsVerified);
+                return verifiedResponse;
+            }
+
+            if (completion.FinishReason !=
+                ChatFinishReason.ToolCalls)
+            {
+                throw new InvalidOperationException(
+                    $"Unexpected finish reason: {completion.FinishReason}");
+            }
+
+            messages.Add(new AssistantChatMessage(completion));
+
+
+            foreach (var call in completion.ToolCalls)
+            {
+                var toolStartedAt = Stopwatch.GetTimestamp();
+                using var toolActivity = telemetry.StartToolCall(
+                    call.FunctionName);
+                string result;
+
+                try
+                {
+                    result = ExecuteTool(call);
+                }
+                finally
+                {
+                    telemetry.RecordToolCall(
+                        call.FunctionName,
+                        Stopwatch.GetElapsedTime(toolStartedAt));
+                }
+
+                toolResults.Add(result);
+
+                messages.Add(new ToolChatMessage(
+                    call.Id,
+                    result));
+            }
+
+        }
+
+        throw new InvalidOperationException(
+            "Agent exceeded the maximum tool-call rounds.");
+    }
+
+    private string ExecuteTool(ChatToolCall call)
+    {
+        if (call.FunctionName == "compare_content_performance")
+        {
+            return CompareContentPerformance();
+        }
+
+        if (call.FunctionName != "get_content_analytics")
+        {
+            return JsonSerializer.Serialize(new
+            {
+                error = "Unknown tool"
+            });
+        }
+
+        try
+        {
+            using var args = JsonDocument.Parse(
+                call.FunctionArguments);
+
+            var idText = args.RootElement
+                .GetProperty("contentId")
+                .GetString();
+
+            if (!Guid.TryParse(idText, out var contentId))
+            {
+                return """{"error":"Invalid content ID"}""";
+            }
+
+            var content = _repository.GetContent(contentId);
+
+            if (content is null)
+            {
+                return """{"error":"Content not found"}""";
+            }
+
+            var events = _repository.GetViewingEvents(contentId);
+
+            return JsonSerializer.Serialize(new
+            {
+                content.Id,
+                content.Title,
+                ViewingSessions = events.Count,
+                CompletionRate =
+                    _analytics.GetCompletionRate(contentId, events),
+                AdExposureRate =
+                    _analytics.GetAdExposureRate(contentId, events),
+                DataSource = "Synthetic viewing events"
+            });
+        }
+        catch (Exception ex) when (
+            ex is JsonException ||
+            ex is KeyNotFoundException ||
+            ex is InvalidOperationException)
+        {
+            return """{"error":"Invalid tool arguments"}""";
+        }
+    }
+
+    private string CompareContentPerformance()
+    {
+        var results = _repository.GetContents()
+            .Select(content =>
+            {
+                var events = _repository.GetViewingEvents(content.Id);
+
+                return new
+                {
+                    content.Title,
+                    content.Genre,
+                    ViewingSessions = events.Count,
+                    CompletionRate = _analytics.GetCompletionRate(
+                        content.Id, events),
+                    AdExposureRate = _analytics.GetAdExposureRate(
+                        content.Id, events)
+                };
+            })
+            .OrderByDescending(x => x.CompletionRate)
+            .ToArray();
+
+        return JsonSerializer.Serialize(new
+        {
+            DataSource = "Synthetic viewing events",
+            Results = results
+        });
+    }
+}
