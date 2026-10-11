@@ -138,6 +138,10 @@ namespace MediaIntelligence.Core.Data
 
             var random = new Random(42);
 
+            var eventSequence = 1;
+            var viewedAtAnchor =
+                new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
             foreach (var content in _contents)
             {
                 for (var i = 0; i < 100; i++)
@@ -146,11 +150,12 @@ namespace MediaIntelligence.Core.Data
                     var adShown = random.NextDouble() < 0.80;
 
                     _events.Add(new ViewingEvent(
-                        Guid.NewGuid(),
+                        Guid.Parse(
+                            $"bbbbbbbb-bbbb-bbbb-bbbb-{eventSequence++:D12}"),
                         content.Id,
                         content.Region,
                         i % 2 == 0 ? "Connected TV" : "Mobile",
-                        DateTime.UtcNow.AddDays(-random.Next(1, 30)),
+                        viewedAtAnchor.AddDays(-random.Next(1, 30)),
                         random.Next(300, 3600),
                         completed,
                         adShown,

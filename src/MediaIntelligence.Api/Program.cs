@@ -1,4 +1,7 @@
+using MediaIntelligence.Core.Data;
+using MediaIntelligence.Core.Interfaces;
 using MediaIntelligence.Core.Services;
+using Microsoft.EntityFrameworkCore;
 using OpenAI.Chat;
 using Microsoft.Extensions.Options;
 
@@ -7,9 +10,47 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
-builder.Services.AddSingleton<
-    MediaIntelligence.Core.Interfaces.IMediaRepository,
-    MediaIntelligence.Core.Data.SyntheticMediaRepository>();
+builder.Services.AddSingleton<IValidateOptions<StorageOptions>,
+    StorageOptionsValidator>();
+builder.Services.AddOptions<StorageOptions>()
+    .Bind(builder.Configuration.GetSection(StorageOptions.SectionName))
+    .ValidateOnStart();
+
+var configuredStorageProvider = builder.Configuration.GetValue<string>(
+    $"{StorageOptions.SectionName}:Provider") ??
+    StorageProvider.InMemory.ToString();
+if (!Enum.TryParse<StorageProvider>(
+        configuredStorageProvider,
+        ignoreCase: true,
+        out var storageProvider) ||
+    !Enum.IsDefined(storageProvider))
+{
+    throw new InvalidOperationException(
+        $"Unsupported storage provider '{configuredStorageProvider}'.");
+}
+
+if (storageProvider == StorageProvider.PostgreSQL)
+{
+    var connectionStringName = builder.Configuration.GetValue<string>(
+        $"{StorageOptions.SectionName}:PostgreSQL:ConnectionStringName") ??
+        "PostgreSQL";
+    var connectionString = builder.Configuration.GetConnectionString(
+        connectionStringName);
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException(
+            $"ConnectionStrings:{connectionStringName} is required when " +
+            "Storage:Provider is PostgreSQL.");
+    }
+
+    builder.Services.AddDbContext<MediaIntelligenceDbContext>(options =>
+        options.UseNpgsql(connectionString));
+    builder.Services.AddScoped<IMediaRepository, PostgreSqlMediaRepository>();
+}
+else
+{
+    builder.Services.AddSingleton<IMediaRepository, SyntheticMediaRepository>();
+}
 
 builder.Services.AddScoped<
     MediaIntelligence.Core.Interfaces.IAudienceAnalytics,
@@ -103,6 +144,25 @@ builder.Services.AddSingleton(serviceProvider =>
 builder.Services.AddScoped<MediaAgentService>();
 
 var app = builder.Build();
+
+var storageOptions = app.Services
+    .GetRequiredService<IOptions<StorageOptions>>()
+    .Value;
+if (storageOptions.Provider == StorageProvider.PostgreSQL &&
+    storageOptions.PostgreSQL.InitializeOnStartup)
+{
+    if (!app.Environment.IsDevelopment())
+    {
+        throw new InvalidOperationException(
+            "PostgreSQL startup migration and seeding are restricted to " +
+            "Development. Apply migrations explicitly in other environments.");
+    }
+
+    await using var scope = app.Services.CreateAsyncScope();
+    var dbContext = scope.ServiceProvider
+        .GetRequiredService<MediaIntelligenceDbContext>();
+    await PostgreSqlDatabaseInitializer.MigrateAndSeedAsync(dbContext);
+}
 
 if (app.Environment.IsDevelopment())
 {

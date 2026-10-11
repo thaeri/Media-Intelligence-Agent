@@ -14,7 +14,10 @@ flowchart LR
     Agent[MediaAgentService]
     Factory[Validated LLM provider factory]
     LLM[Ollama / OpenAI / Foundry]
-    Repo[SyntheticMediaRepository]
+    Repo[IMediaRepository]
+    Memory[SyntheticMediaRepository]
+    PgRepo[PostgreSqlMediaRepository]
+    Db[(PostgreSQL)]
     Content[AudienceAnalytics]
     Identity[IdentityResolutionService]
     Reach[AudienceIdentityAnalytics]
@@ -26,6 +29,9 @@ flowchart LR
     API --> Agent
     API --> Content
     API --> Repo
+    Repo --> Memory
+    Repo --> PgRepo
+    PgRepo --> Db
     Agent --> Factory
     Factory <--> LLM
     Agent --> Repo
@@ -43,6 +49,40 @@ flowchart LR
 `MediaIntelligence.Api` is the composition root. `MediaIntelligence.Core`
 contains domain models, interfaces, synthetic data, deterministic analytics,
 agent orchestration, evidence review, and telemetry.
+
+## Storage selection and relational mapping
+
+The composition root selects one `IMediaRepository` implementation from
+`Storage:Provider`. `InMemory` is the default and retains the existing
+singleton synthetic repository. `PostgreSQL` registers a scoped EF Core
+`MediaIntelligenceDbContext` and `PostgreSqlMediaRepository`; analytics and the
+agent continue to depend only on `IMediaRepository`.
+
+The PostgreSQL schema stores media content, viewing events, campaigns, ad
+impressions, pseudonymous audiences, explicit device-to-audience association
+pairs, and consent records. Device IDs remain opaque values and are never
+joined to inferred IP, location, or fingerprint data. A composite association
+key prevents duplicate pairs but deliberately does not make `DeviceId` unique,
+so conflicting explicit mappings remain representable and default-denied by
+the unchanged identity resolver. Consent has one row per audience; absence of
+that row retains default-deny semantics.
+
+Foreign keys enforce content ownership and campaign/content consistency.
+Campaign names and content titles are unique. PostgreSQL `timestamp with time
+zone` stores viewing, campaign, and impression instants; campaign ranges have a
+database check constraint. Query indexes follow current repository access:
+
+- viewing events by `(ContentId, ViewedAtUtc)`;
+- ad impressions by `(CampaignId, OccurredAtUtc)` and by `ContentId`;
+- campaigns by `ContentId` and unique `Name`;
+- associations by `AudienceId`, while the composite primary key begins with
+  `DeviceId` for identity lookup;
+- consent and audience lookups use their primary keys.
+
+The initial migration is checked in. Production startup never applies it.
+Migration and deterministic seed execution are available only through explicit
+deployment commands or the opt-in Development initializer. The seed uses
+stable keys and inserts missing records without duplicating existing fixtures.
 
 ## Provider registration and authentication
 

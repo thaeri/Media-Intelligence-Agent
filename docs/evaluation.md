@@ -5,8 +5,11 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The repository currently contains 85 xUnit tests. They do not call Ollama,
+The ordinary offline suite contains 89 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
+One additional real-PostgreSQL migration, idempotency, and metric-parity test
+is skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
+database. It uses Npgsql rather than EF's in-memory provider.
 
 ### Deterministic analytics
 
@@ -63,6 +66,14 @@ method. It verifies:
   fail validation.
 - Unsupported provider values and out-of-range timeouts are rejected.
 - Provider tests only resolve configuration metadata and never send requests.
+
+### Storage configuration
+
+- In-memory storage remains the default.
+- PostgreSQL selection requires a named connection string.
+- Unsupported providers fail validation rather than falling back.
+- The optional PostgreSQL test applies the real migration, runs the seed twice,
+  and verifies the documented campaign metrics remain identical.
 
 ### Campaign analytics
 
@@ -138,8 +149,8 @@ The final campaign drafts did not pass live evidence verification. Formatting
 used by the model exposed deterministic parsing gaps involving comparison
 headings and metric labels followed by parenthetical definitions. Local-only
 diagnostics captured redacted copies of the rejected drafts outside the
-repository. Those exact drafts were converted into offline regression tests,
-and all 85 offline tests now pass with the corrected attribution rules.
+repository. Those exact drafts were converted into offline regression tests
+and pass with the corrected attribution rules.
 
 This establishes successful live Foundry tool execution and successful exact
 offline reproduction, not a successful live campaign response boundary. The

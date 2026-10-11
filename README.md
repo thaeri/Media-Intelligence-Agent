@@ -57,13 +57,15 @@ Campaign definitions are documented in
 - Ollama `qwen3:4b`
 - OpenAI Chat Completions with `gpt-4.1-mini` by default
 - Microsoft Foundry `/openai/v1/` model inference with Entra ID or API key
+- Entity Framework Core 10 and Npgsql for optional PostgreSQL persistence
 - xUnit and Microsoft Test SDK
 - `ILogger` structured logging
 - `System.Diagnostics.ActivitySource`
 - GitHub Actions using the .NET 10 SDK
 
-No database or external telemetry backend is required. The default Ollama
-configuration requires no cloud account or paid request.
+No database or external telemetry backend is required. Storage defaults to the
+existing in-memory synthetic repository, and the default Ollama configuration
+requires no cloud account or paid request.
 
 ## Windows setup
 
@@ -103,6 +105,53 @@ dotnet run --project src/MediaIntelligence.Api --launch-profile http
 
 The HTTP launch profile listens on `http://localhost:5215`. The agent client
 connects to Ollama at `http://localhost:11434/v1` and uses `qwen3:4b`.
+
+## Storage configuration
+
+`Storage:Provider` accepts `InMemory` or `PostgreSQL` and defaults to
+`InMemory`. Both implementations satisfy the same repository contract, so API
+responses, analytics, agent tools, evidence verification, and privacy rules do
+not change when storage is switched.
+
+PostgreSQL persists media content, viewing events, campaigns, ad impressions,
+pseudonymous device-to-audience associations, and consent state. Configure its
+connection string through an environment variable or User Secrets; no
+connection string is checked in:
+
+```powershell
+$env:Storage__Provider = "PostgreSQL"
+$env:ConnectionStrings__PostgreSQL = "<postgresql-connection-string>"
+```
+
+```powershell
+dotnet user-secrets set "Storage:Provider" "PostgreSQL" --project src/MediaIntelligence.Api
+dotnet user-secrets set "ConnectionStrings:PostgreSQL" "<postgresql-connection-string>" --project src/MediaIntelligence.Api
+```
+
+Apply the checked-in migration explicitly:
+
+```powershell
+$env:ConnectionStrings__PostgreSQL = "<postgresql-connection-string>"
+dotnet ef database update --project src/MediaIntelligence.Core --startup-project src/MediaIntelligence.Api
+```
+
+Production never migrates automatically. For a disposable local Development
+database only, `Storage:PostgreSQL:InitializeOnStartup=true` applies migrations
+and runs the deterministic idempotent seed. The seed preserves the documented
+campaign fixtures: City Stories Launch is `10` total / `5` eligible / reach
+`2` / frequency `2.5` / coverage `50%`; Desert Heroes Encore is `10` / `6` /
+`2` / `3.0` / `60%`.
+
+The optional real-PostgreSQL parity test is skipped unless a connection to a
+dedicated database whose name contains `test` is supplied:
+
+```powershell
+$env:MEDIAINTELLIGENCE_TEST_POSTGRES = "<dedicated-test-database-connection-string>"
+dotnet test MediaIntelligence.slnx -c Release
+```
+
+The test uses Npgsql and the real migration; it does not substitute EF's
+in-memory provider.
 
 ## LLM provider configuration
 
@@ -252,7 +301,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 85 tests covering:
+The current offline suite contains 89 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
