@@ -1,8 +1,8 @@
 # Privacy-safe audience identity metrics
 
 All identities and events in this project are synthetic. `AudienceId` and
-`DeviceId` values are opaque pseudonyms and do not contain customer, Samba,
-IP-address, location, fingerprint, or other personal data.
+`DeviceId` values are opaque pseudonyms and do not contain customer data,
+IP-addresses, locations, fingerprints, or other personal data.
 
 Identity resolution uses only explicit device-to-audience associations. A
 device is eligible only when it maps unambiguously to one audience and that

@@ -7,8 +7,7 @@ evidence verification,
 privacy-safe audience identity resolution, and structured observability.
 
 This repository is an engineering demonstration. It contains no production
-customer data, Samba data, real device identifiers, or probabilistic identity
-matching.
+customer data, real device identifiers, or probabilistic identity matching.
 
 ## What it demonstrates
 
