@@ -28,8 +28,9 @@ public sealed partial class EvidenceReviewerService
             .Cast<string>()
             .ToArray();
 
-        var unsupportedClaims = NumericClaimRegex()
+        var unsupportedNumericClaims = NumericClaimRegex()
             .Matches(response)
+            .Where(match => !IsWithinIsoDate(response, match.Index))
             .Select(match => new NumericClaim(
                 match.Value.Trim(),
                 double.Parse(
@@ -40,7 +41,13 @@ public sealed partial class EvidenceReviewerService
                 FindAttributedMetric(response, match.Index)))
             .Where(claim => !evidence.Any(value => Matches(claim, value)))
             .Select(claim => claim.Text)
-            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        var unsupportedClaims = SensitiveIdentifierRegex()
+            .Matches(response)
+            .Select(match => match.Value)
+            .Concat(unsupportedNumericClaims)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         return new EvidenceReviewResult(
@@ -187,15 +194,6 @@ public sealed partial class EvidenceReviewerService
         int claimIndex,
         IReadOnlyList<string> titles)
     {
-        var sentenceStart = response.LastIndexOfAny(
-            ['.', '!', '?', '\n'],
-            Math.Max(0, claimIndex - 1));
-        sentenceStart = sentenceStart < 0 ? 0 : sentenceStart + 1;
-        var sentenceEnd = response.IndexOfAny(
-            ['.', '!', '?', '\n'],
-            claimIndex);
-        sentenceEnd = sentenceEnd < 0 ? response.Length : sentenceEnd;
-
         string? closestTitle = null;
         var closestTitleIndex = -1;
 
@@ -204,10 +202,10 @@ public sealed partial class EvidenceReviewerService
             var titleIndex = response.LastIndexOf(
                 title,
                 claimIndex,
-                claimIndex - sentenceStart + 1,
+                claimIndex + 1,
                 StringComparison.OrdinalIgnoreCase);
 
-            if (titleIndex >= sentenceStart && titleIndex > closestTitleIndex)
+            if (titleIndex > closestTitleIndex)
             {
                 closestTitle = title;
                 closestTitleIndex = titleIndex;
@@ -219,6 +217,7 @@ public sealed partial class EvidenceReviewerService
             return closestTitle;
         }
 
+        var clauseEnd = FindClauseEnd(response, claimIndex);
         var closestFollowingIndex = int.MaxValue;
         foreach (var title in titles)
         {
@@ -228,7 +227,7 @@ public sealed partial class EvidenceReviewerService
                 StringComparison.OrdinalIgnoreCase);
 
             if (titleIndex >= 0 &&
-                titleIndex < sentenceEnd &&
+                titleIndex < clauseEnd &&
                 titleIndex < closestFollowingIndex)
             {
                 closestTitle = title;
@@ -243,25 +242,21 @@ public sealed partial class EvidenceReviewerService
         string response,
         int claimIndex)
     {
-        var sentenceStart = response.LastIndexOfAny(
-            ['.', '!', '?', '\n'],
-            Math.Max(0, claimIndex - 1));
-        sentenceStart = sentenceStart < 0 ? 0 : sentenceStart + 1;
-        var sentenceEnd = response.IndexOfAny(
-            ['.', '!', '?', '\n'],
-            claimIndex);
-        sentenceEnd = sentenceEnd < 0 ? response.Length : sentenceEnd;
-        var sentence = response[sentenceStart..sentenceEnd];
-        var relativeClaimIndex = claimIndex - sentenceStart;
-        string? closestMetric = null;
-        var closestDistance = int.MaxValue;
+        var clauseStart = FindClauseStart(response, claimIndex);
+        var clauseEnd = FindClauseEnd(response, claimIndex);
+        var clause = response[clauseStart..clauseEnd];
+        var relativeClaimIndex = claimIndex - clauseStart;
+        string? precedingMetric = null;
+        var precedingDistance = int.MaxValue;
+        string? followingMetric = null;
+        var followingDistance = int.MaxValue;
 
         foreach (var (phrase, metric) in MetricPhrases)
         {
             var searchIndex = 0;
-            while (searchIndex < sentence.Length)
+            while (searchIndex < clause.Length)
             {
-                var phraseIndex = sentence.IndexOf(
+                var phraseIndex = clause.IndexOf(
                     phrase,
                     searchIndex,
                     StringComparison.OrdinalIgnoreCase);
@@ -270,19 +265,65 @@ public sealed partial class EvidenceReviewerService
                     break;
                 }
 
-                var distance = Math.Abs(relativeClaimIndex - phraseIndex);
-                if (distance < closestDistance)
+                var phraseEnd = phraseIndex + phrase.Length;
+                if (phraseEnd <= relativeClaimIndex)
                 {
-                    closestMetric = metric;
-                    closestDistance = distance;
+                    var distance = relativeClaimIndex - phraseEnd;
+                    if (distance < precedingDistance)
+                    {
+                        precedingMetric = metric;
+                        precedingDistance = distance;
+                    }
+                }
+                else if (phraseIndex >= relativeClaimIndex)
+                {
+                    var distance = phraseIndex - relativeClaimIndex;
+                    if (distance < followingDistance)
+                    {
+                        followingMetric = metric;
+                        followingDistance = distance;
+                    }
                 }
 
                 searchIndex = phraseIndex + phrase.Length;
             }
         }
 
-        return closestMetric;
+        if (precedingMetric is null)
+        {
+            return followingMetric;
+        }
+
+        if (followingMetric is null)
+        {
+            return precedingMetric;
+        }
+
+        return precedingDistance <= followingDistance
+            ? precedingMetric
+            : followingMetric;
     }
+
+    private static int FindClauseStart(string response, int claimIndex)
+    {
+        var boundary = response.LastIndexOfAny(
+            [',', ';', '\n', '|'],
+            Math.Max(0, claimIndex - 1));
+        return boundary < 0 ? 0 : boundary + 1;
+    }
+
+    private static int FindClauseEnd(string response, int claimIndex)
+    {
+        var boundary = response.IndexOfAny(
+            [',', ';', '\n', '|'],
+            claimIndex);
+        return boundary < 0 ? response.Length : boundary;
+    }
+
+    private static bool IsWithinIsoDate(string response, int claimIndex) =>
+        IsoDateRegex().Matches(response).Any(match =>
+            claimIndex >= match.Index &&
+            claimIndex < match.Index + match.Length);
 
     private static string? NormalizeMetric(string? propertyName)
     {
@@ -355,4 +396,14 @@ public sealed partial class EvidenceReviewerService
         @"(?<![\p{L}\p{N}_])(?<value>\d+(?:\.\d+)?)(?:\s*(?:%|percent(?:age)?(?:\s+points?)?|viewing\s+sessions?|sessions?))?",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex NumericClaimRegex();
+
+    [GeneratedRegex(
+        @"\b\d{4}-\d{2}-\d{2}(?:[Tt]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]00:00)?)?\b",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex IsoDateRegex();
+
+    [GeneratedRegex(
+        @"\b(?:device|audience)[-_][\p{L}\p{N}_-]+\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SensitiveIdentifierRegex();
 }

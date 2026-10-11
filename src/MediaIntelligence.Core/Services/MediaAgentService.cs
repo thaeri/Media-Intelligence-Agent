@@ -237,7 +237,7 @@ Available campaign catalog:
         };
 
         var options = new ChatCompletionOptions();
-        options.MaxOutputTokenCount = 1000;
+        options.MaxOutputTokenCount = 4000;
         options.Tools.Add(AnalyticsTool);
         options.Tools.Add(ComparisonTool);
         options.Tools.Add(AudienceIdentityMetricsTool);

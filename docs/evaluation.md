@@ -5,7 +5,7 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The repository currently contains 55 xUnit tests. They do not call Ollama,
+The repository currently contains 62 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 
 ### Deterministic analytics
@@ -72,6 +72,9 @@ method. It verifies:
 - Zero-total and zero-reach denominator behavior.
 - Deterministic unknown-campaign and invalid-range errors.
 - Wrong-campaign and wrong-metric evidence attribution.
+- Structured campaign sections and Markdown tables with UTC dates, repeated
+  totals, decimals, and percentages.
+- Rejection of unsupported standalone years and raw pseudonymous identifiers.
 - Aggregate-only tool payloads, identifier non-disclosure, and unchanged
   `{ "answer": ... }` serialization.
 

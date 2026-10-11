@@ -253,7 +253,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 55 tests covering:
+The current offline suite contains 62 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title

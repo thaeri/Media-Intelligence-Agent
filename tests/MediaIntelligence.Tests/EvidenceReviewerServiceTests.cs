@@ -182,6 +182,58 @@ public sealed class EvidenceReviewerServiceTests
             string.Join(", ", result.UnsupportedClaims));
     }
 
+    [Fact]
+    public void Review_AcceptsRepeatedMetricValueAcrossCampaigns()
+    {
+        var result = _reviewer.Review(
+            "Both campaigns recorded 10 total impressions.",
+            [CampaignComparisonEvidence]);
+
+        Assert.True(
+            result.IsVerified,
+            string.Join(", ", result.UnsupportedClaims));
+    }
+
+    [Fact]
+    public void Review_IgnoresIsoDatesButNotUnsupportedStandaloneYears()
+    {
+        var accepted = _reviewer.Review(
+            "Window: 2026-01-01T00:00:00Z to 2026-02-01. " +
+            "City Stories Launch had reach of 2.",
+            [CampaignComparisonEvidence]);
+        var rejected = _reviewer.Review(
+            "City Stories Launch is projected through 2027 with reach of 2.",
+            [CampaignComparisonEvidence]);
+
+        Assert.True(
+            accepted.IsVerified,
+            string.Join(", ", accepted.UnsupportedClaims));
+        Assert.False(rejected.IsVerified);
+        Assert.Contains("2027", rejected.UnsupportedClaims);
+    }
+
+    [Fact]
+    public void Review_RejectsRawPseudonymousIdentifierEvenWhenDigitsMatchEvidence()
+    {
+        var result = _reviewer.Review(
+            "City Stories Launch reach came from device-002.",
+            [CampaignComparisonEvidence]);
+
+        Assert.False(result.IsVerified);
+        Assert.Contains("device-002", result.UnsupportedClaims);
+    }
+
+    [Fact]
+    public void Review_RejectsWrongMetricDespiteValueExistingForAnotherMetric()
+    {
+        var result = _reviewer.Review(
+            "City Stories Launch has reach of 5.",
+            [CampaignComparisonEvidence]);
+
+        Assert.False(result.IsVerified);
+        Assert.Contains("5", result.UnsupportedClaims);
+    }
+
     private static string AnalyticsResult(double completionRate, int sessions) =>
         FormattableString.Invariant($$"""
         {

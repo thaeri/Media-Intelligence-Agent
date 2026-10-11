@@ -85,6 +85,82 @@ public sealed class CampaignAgentIntegrationTests
         AssertNoIdentityLeakage(repository, response);
     }
 
+    [Fact]
+    public void StructuredCampaignDraft_WithHeadingsDatesDecimalsAndPercentages_IsVerified()
+    {
+        var repository = new SyntheticMediaRepository();
+        var agent = CreateAgent(repository);
+        var evidence = agent.CompareCampaignPerformance();
+        const string draft = """
+            ## City Stories Launch
+            Window: 2026-01-01T00:00:00Z to 2026-02-01T00:00:00Z
+            - Total impressions: 10
+            - Eligible impressions: 5
+            - Unique audience reach: 2
+            - Average frequency: 2.5
+            - Eligible coverage: 50%
+
+            ## Desert Heroes Encore
+            Window: 2026-02-01T00:00:00Z to 2026-03-01T00:00:00Z
+            - Total impressions: 10
+            - Eligible impressions: 6
+            - Unique audience reach: 2
+            - Average frequency: 3.0
+            - Eligible coverage: 60%
+            """;
+
+        var finalized = agent.FinalizeResponse(draft, [evidence]);
+
+        Assert.True(
+            finalized.Review.IsVerified,
+            string.Join(", ", finalized.Review.UnsupportedClaims));
+        Assert.Equal(draft, finalized.Response);
+    }
+
+    [Fact]
+    public void StructuredCampaignDraft_RejectsValueBorrowedFromOtherCampaign()
+    {
+        var repository = new SyntheticMediaRepository();
+        var agent = CreateAgent(repository);
+        var evidence = agent.CompareCampaignPerformance();
+        const string draft = """
+            ## City Stories Launch
+            - Eligible impressions: 6
+
+            ## Desert Heroes Encore
+            - Eligible impressions: 6
+            """;
+
+        var finalized = agent.FinalizeResponse(draft, [evidence]);
+
+        Assert.False(finalized.Review.IsVerified);
+        Assert.Contains("6", finalized.Review.UnsupportedClaims);
+        Assert.StartsWith("Evidence verification failed", finalized.Response);
+    }
+
+    [Fact]
+    public void CampaignMarkdownTable_WithRepeatedTotalsAndPercentages_IsVerified()
+    {
+        var repository = new SyntheticMediaRepository();
+        var agent = CreateAgent(repository);
+        var evidence = agent.CompareCampaignPerformance();
+        const string draft = """
+            Window dates are 2026-01-01 through 2026-03-01.
+
+            | Campaign | Total impressions | Eligible impressions | Reach | Average frequency | Eligible coverage |
+            | --- | ---: | ---: | ---: | ---: | ---: |
+            | City Stories Launch | 10 | 5 | 2 | 2.5 | 50% |
+            | Desert Heroes Encore | 10 | 6 | 2 | 3.0 | 60% |
+            """;
+
+        var finalized = agent.FinalizeResponse(draft, [evidence]);
+
+        Assert.True(
+            finalized.Review.IsVerified,
+            string.Join(", ", finalized.Review.UnsupportedClaims));
+        Assert.Equal(draft, finalized.Response);
+    }
+
     private static MediaAgentService CreateAgent(
         SyntheticMediaRepository repository)
     {
