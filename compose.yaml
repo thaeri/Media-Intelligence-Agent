@@ -1,0 +1,85 @@
+name: media-intelligence
+
+x-database-environment: &database-environment
+  POSTGRES_DB: ${POSTGRES_DB:-media_intelligence_test}
+  POSTGRES_USER: ${POSTGRES_USER:-media_app}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+
+x-api-environment: &api-environment
+  ASPNETCORE_ENVIRONMENT: Development
+  Storage__Provider: PostgreSQL
+  ConnectionStrings__PostgreSQL: Host=postgres;Port=5432;Database=${POSTGRES_DB:-media_intelligence_test};Username=${POSTGRES_USER:-media_app};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+  Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+    environment: *database-environment
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    environment: *api-environment
+    command: ["--migrate-and-seed"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    build:
+      context: .
+      target: runtime
+    environment: *api-environment
+    ports:
+      - "127.0.0.1:${API_PORT:-5215}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  integration-tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    environment:
+      MEDIAINTELLIGENCE_TEST_POSTGRES: Host=postgres;Port=5432;Database=${POSTGRES_DB:-media_intelligence_test};Username=${POSTGRES_USER:-media_app};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    command:
+      - --filter
+      - FullyQualifiedName~PostgreSqlRepositoryIntegrationTests
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres-data:

@@ -80,9 +80,29 @@ database check constraint. Query indexes follow current repository access:
 - consent and audience lookups use their primary keys.
 
 The initial migration is checked in. Production startup never applies it.
-Migration and deterministic seed execution are available only through explicit
-deployment commands or the opt-in Development initializer. The seed uses
-stable keys and inserts missing records without duplicating existing fixtures.
+Migration and deterministic seed execution use the explicit
+`--migrate-and-seed` command, which refuses to run outside Development. The
+seed uses stable keys and inserts missing records without duplicating existing
+fixtures.
+
+## Docker Compose startup ordering
+
+The default Compose project runs three services: PostgreSQL, a one-shot
+migration/seed container, and the API. PostgreSQL must pass `pg_isready`; the
+migration container then applies the checked-in migration and idempotent seed;
+the API starts only after that container exits successfully. Normal API
+containers never migrate, eliminating multi-instance startup races.
+
+PostgreSQL uses a persistent named volume and is not published to the host.
+Only the API is bound, on loopback. The API health check covers its selected
+storage, and Compose gates it on both database health and migration completion.
+An optional test-profile container runs the real Npgsql integration test on
+the private network.
+
+The PostgreSQL image includes pgvector for forward compatibility, but the
+application does not enable embeddings, vector columns, or similarity search.
+No Ollama service or model download is part of the Compose project. Ollama,
+OpenAI, and Foundry remain separately configured optional LLM providers.
 
 ## Provider registration and authentication
 

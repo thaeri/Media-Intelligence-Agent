@@ -21,8 +21,6 @@ public sealed class StorageOptions
 public sealed class PostgreSqlStorageOptions
 {
     public string ConnectionStringName { get; set; } = "PostgreSQL";
-
-    public bool InitializeOnStartup { get; set; }
 }
 
 public sealed class StorageOptionsValidator : IValidateOptions<StorageOptions>

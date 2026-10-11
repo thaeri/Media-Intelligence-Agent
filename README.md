@@ -135,12 +135,22 @@ $env:ConnectionStrings__PostgreSQL = "<postgresql-connection-string>"
 dotnet ef database update --project src/MediaIntelligence.Core --startup-project src/MediaIntelligence.Api
 ```
 
-Production never migrates automatically. For a disposable local Development
-database only, `Storage:PostgreSQL:InitializeOnStartup=true` applies migrations
-and runs the deterministic idempotent seed. The seed preserves the documented
-campaign fixtures: City Stories Launch is `10` total / `5` eligible / reach
-`2` / frequency `2.5` / coverage `50%`; Desert Heroes Encore is `10` / `6` /
-`2` / `3.0` / `60%`.
+Production never migrates automatically. A disposable local Development
+environment can explicitly apply migrations and run the deterministic,
+idempotent seed as a one-shot command:
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+$env:Storage__Provider = "PostgreSQL"
+$env:ConnectionStrings__PostgreSQL = "<postgresql-connection-string>"
+dotnet run --project src/MediaIntelligence.Api -- --migrate-and-seed
+```
+
+The command refuses to run outside Development or without PostgreSQL selected.
+It exits when complete, so normal API instances never race to migrate. The seed
+preserves the documented campaign fixtures: City Stories Launch is `10` total /
+`5` eligible / reach `2` / frequency `2.5` / coverage `50%`; Desert Heroes
+Encore is `10` / `6` / `2` / `3.0` / `60%`.
 
 The optional real-PostgreSQL parity test is skipped unless a connection to a
 dedicated database whose name contains `test` is supplied:
@@ -152,6 +162,77 @@ dotnet test MediaIntelligence.slnx -c Release
 
 The test uses Npgsql and the real migration; it does not substitute EF's
 in-memory provider.
+
+## Docker Compose quick start
+
+The Compose environment contains PostgreSQL with pgvector available, a
+one-shot migration/seed service, and the API. It does not include Ollama or
+download any model. Copy the example environment and replace the development
+password before starting:
+
+```powershell
+Copy-Item .env.example .env
+# Edit POSTGRES_PASSWORD in .env.
+docker compose up --build --detach
+docker compose ps
+```
+
+PostgreSQL has no host port. The API is bound to loopback at
+`http://localhost:5215` by default. Check health and deterministic data:
+
+```powershell
+Invoke-RestMethod http://localhost:5215/health
+Invoke-RestMethod http://localhost:5215/api/media
+```
+
+Run the real PostgreSQL migration/idempotency/parity test inside the private
+Compose network:
+
+```powershell
+docker compose --profile test run --rm integration-tests
+```
+
+Confirm the image supplies pgvector without enabling embeddings or vector
+search in the application:
+
+```powershell
+docker compose exec postgres psql -U media_app -d media_intelligence_test -c "SELECT name, default_version FROM pg_available_extensions ORDER BY name;"
+```
+
+If you changed `POSTGRES_USER` or `POSTGRES_DB`, substitute those values in the
+command and confirm the result contains `vector`.
+
+Restart only the API to verify database persistence:
+
+```powershell
+docker compose restart api
+Invoke-RestMethod http://localhost:5215/api/media
+```
+
+Stop containers while retaining the database volume with `docker compose
+down`. Use `docker compose down --volumes` only when intentionally deleting the
+local database.
+
+Agent calls remain optional. The default Compose stack runs no model server.
+Configure host Ollama, OpenAI, or Foundry separately with the existing `Llm:*`
+environment variables and secrets described below. Cloud keys must remain in
+the untracked `.env`, environment, or User Secrets and must never be placed in
+`compose.yaml`.
+
+Troubleshooting:
+
+- If `migrate` fails, inspect `docker compose logs migrate postgres`; the API
+  intentionally remains stopped.
+- If the API is unhealthy, inspect `docker compose logs api` and verify the
+  `migrate` service exited with code zero.
+- If port 5215 is occupied, set `API_PORT` in `.env`.
+- If credentials change after the volume is created, remove the volume only if
+  its local data is disposable, then recreate the stack.
+
+This setup is for local development. The example uses one database credential,
+unencrypted traffic on a private Docker network, a locally stored Docker
+volume, and no secret manager, backup, TLS, resource limits, or production
+hardening.
 
 ## LLM provider configuration
 

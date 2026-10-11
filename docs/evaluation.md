@@ -11,6 +11,9 @@ One additional real-PostgreSQL migration, idempotency, and metric-parity test
 is skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
 database. It uses Npgsql rather than EF's in-memory provider.
 
+The Docker Compose test profile supplies that connection internally without
+publishing PostgreSQL to the host. Ordinary CI remains database-independent.
+
 ### Deterministic analytics
 
 - Completion-rate calculation.
@@ -74,6 +77,29 @@ method. It verifies:
 - Unsupported providers fail validation rather than falling back.
 - The optional PostgreSQL test applies the real migration, runs the seed twice,
   and verifies the documented campaign metrics remain identical.
+
+### Docker Compose PostgreSQL verification
+
+The Step 14 local Compose verification used the pinned PostgreSQL 17 plus
+pgvector `0.8.1` image. Compose configuration and image builds succeeded. The
+database health check passed, the one-shot Development migration/seed service
+applied `InitialPostgreSqlPersistence`, and the API started only after that
+service completed successfully.
+
+The real Npgsql integration test ran inside the Compose network with `1`
+passed, `0` failed, and `0` skipped. It reapplied the idempotent seed and
+verified City Stories Launch at `10` total, `5` eligible, reach `2`, frequency
+`2.5`, and coverage `50%`, and Desert Heroes Encore at `10`, `6`, `2`, `3.0`,
+and `60%` respectively.
+
+The containerized API health endpoint returned `Healthy` and `/api/media`
+returned three records. Before and after restarting only the API, PostgreSQL
+retained two campaigns, twenty impressions, and three content records. The API
+ran as the non-root `app` user, PostgreSQL had no host-published port, and the
+local development credential did not appear in container logs. PostgreSQL
+reported the `vector` extension available at version `0.8.1`; the application
+did not install vector columns, embeddings, or search behavior. No LLM service
+or paid request was involved.
 
 ### Campaign analytics
 

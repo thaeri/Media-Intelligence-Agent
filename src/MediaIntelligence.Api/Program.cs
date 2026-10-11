@@ -9,6 +9,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+builder.Services.AddHealthChecks()
+    .AddCheck<StorageHealthCheck>("storage");
 
 builder.Services.AddSingleton<IValidateOptions<StorageOptions>,
     StorageOptionsValidator>();
@@ -148,20 +150,21 @@ var app = builder.Build();
 var storageOptions = app.Services
     .GetRequiredService<IOptions<StorageOptions>>()
     .Value;
-if (storageOptions.Provider == StorageProvider.PostgreSQL &&
-    storageOptions.PostgreSQL.InitializeOnStartup)
+if (args.Contains("--migrate-and-seed", StringComparer.Ordinal))
 {
-    if (!app.Environment.IsDevelopment())
+    if (!app.Environment.IsDevelopment() ||
+        storageOptions.Provider != StorageProvider.PostgreSQL)
     {
         throw new InvalidOperationException(
-            "PostgreSQL startup migration and seeding are restricted to " +
-            "Development. Apply migrations explicitly in other environments.");
+            "The migration and seed command requires Development and " +
+            "PostgreSQL storage.");
     }
 
     await using var scope = app.Services.CreateAsyncScope();
     var dbContext = scope.ServiceProvider
         .GetRequiredService<MediaIntelligenceDbContext>();
     await PostgreSqlDatabaseInitializer.MigrateAndSeedAsync(dbContext);
+    return;
 }
 
 if (app.Environment.IsDevelopment())
@@ -174,5 +177,6 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 app.Run();

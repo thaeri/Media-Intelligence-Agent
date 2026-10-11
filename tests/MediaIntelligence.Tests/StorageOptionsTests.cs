@@ -11,7 +11,7 @@ public sealed class StorageOptionsTests
         var options = new StorageOptions();
 
         Assert.Equal(StorageProvider.InMemory, options.Provider);
-        Assert.False(options.PostgreSQL.InitializeOnStartup);
+        Assert.Equal("PostgreSQL", options.PostgreSQL.ConnectionStringName);
     }
 
     [Fact]
