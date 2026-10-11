@@ -1,0 +1,56 @@
+services:
+  api:
+    environment:
+      Benchmark__Enabled: "true"
+      Llm__Provider: Ollama
+      Llm__Ollama__Endpoint: http://api:8080/api/benchmark/v1
+      Llm__Ollama__Model: deterministic-benchmark
+
+  api-memory:
+    profiles: ["benchmark"]
+    build:
+      context: .
+      target: runtime
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Storage__Provider: InMemory
+      Benchmark__Enabled: "true"
+      Llm__Provider: Ollama
+      Llm__Ollama__Endpoint: http://api-memory:8080/api/benchmark/v1
+      Llm__Ollama__Model: deterministic-benchmark
+      Logging__LogLevel__Default: Warning
+      Observability__Enabled: ${BENCHMARK_OBSERVABILITY:-false}
+      Observability__OtlpEndpoint: http://otel-collector:4317
+    ports:
+      - "127.0.0.1:${BENCHMARK_MEMORY_PORT:-5216}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  k6:
+    profiles: ["benchmark"]
+    image: grafana/k6:2.3.0
+    environment:
+      BASE_URL: ${BENCHMARK_BASE_URL:-http://api-memory:8080}
+      STORAGE: ${BENCHMARK_STORAGE:-inmemory}
+      MODE: ${BENCHMARK_MODE:-api}
+      VUS: ${BENCHMARK_VUS:-4}
+      WARMUP: ${BENCHMARK_WARMUP:-5s}
+      DURATION: ${BENCHMARK_DURATION:-15s}
+    volumes:
+      - ./benchmarks:/benchmarks
+    command: ["run", "/benchmarks/media-intelligence.js"]
+    depends_on:
+      api:
+        condition: service_healthy
+      api-memory:
+        condition: service_healthy
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true

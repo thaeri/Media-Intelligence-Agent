@@ -94,7 +94,8 @@ public sealed class AgentTelemetryServiceTests
     [Fact]
     public void Metrics_RecordDurationsErrorsAndEvidenceWithoutSensitiveContent()
     {
-        var measurements = new List<(string Name, double Value, string Tags)>();
+        var measurements = new System.Collections.Concurrent.ConcurrentBag<
+            (string Name, double Value, string Tags)>();
         using var listener = new MeterListener
         {
             InstrumentPublished = (instrument, meterListener) =>
@@ -118,6 +119,8 @@ public sealed class AgentTelemetryServiceTests
             request.RecordToolCall(
                 "get_campaign_performance", TimeSpan.FromMilliseconds(3),
                 succeeded: false);
+            request.RecordStructuredValidation(
+                2, verified: false, TimeSpan.FromMilliseconds(2));
             request.Complete(evidenceVerified: false);
         }
 
@@ -130,6 +133,11 @@ public sealed class AgentTelemetryServiceTests
             item.Name == "media.agent.tool.errors" && item.Value == 1);
         Assert.Contains(measurements, item =>
             item.Name == "media.agent.evidence.verification.failures" &&
+            item.Value == 1);
+        Assert.Contains(measurements, item =>
+            item.Name == "media.agent.evidence.verification.duration");
+        Assert.Contains(measurements, item =>
+            item.Name == "media.agent.evidence.verification.retries" &&
             item.Value == 1);
         Assert.DoesNotContain(measurements, item =>
             item.Tags.Contains("private-request-id", StringComparison.Ordinal));

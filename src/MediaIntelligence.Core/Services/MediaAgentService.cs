@@ -334,10 +334,13 @@ Strict response schema:
                         .Select(c => c.Text));
 
                 validationAttempts++;
+                var validationStartedAt = Stopwatch.GetTimestamp();
                 var validated = _structuredResponses.Validate(
                     response, toolExecutions);
                 telemetry.RecordStructuredValidation(
-                    validationAttempts, validated.IsValid);
+                    validationAttempts,
+                    validated.IsValid,
+                    Stopwatch.GetElapsedTime(validationStartedAt));
                 if (validated.IsValid)
                 {
                     telemetry.Complete(true);

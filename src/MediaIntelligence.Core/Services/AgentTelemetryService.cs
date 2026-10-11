@@ -23,6 +23,12 @@ public sealed class AgentTelemetryService
     internal static readonly Counter<long> EvidenceFailures = Meter.CreateCounter<long>(
         "media.agent.evidence.verification.failures", "{failure}",
         "Final evidence verification failures");
+    internal static readonly Histogram<double> EvidenceDuration = Meter.CreateHistogram<double>(
+        "media.agent.evidence.verification.duration", "s",
+        "Structured evidence verification duration");
+    internal static readonly Counter<long> EvidenceRetries = Meter.CreateCounter<long>(
+        "media.agent.evidence.verification.retries", "{retry}",
+        "Structured evidence verification retries");
 
     private readonly ILogger<AgentTelemetryService> _logger;
     private readonly LlmClientMetadata _llm;
@@ -145,8 +151,19 @@ public sealed class AgentRequestTelemetry : IDisposable
             duration.TotalMilliseconds);
     }
 
-    public void RecordStructuredValidation(int attempt, bool verified)
+    public void RecordStructuredValidation(
+        int attempt,
+        bool verified,
+        TimeSpan? duration = null)
     {
+        if (duration.HasValue)
+        {
+            AgentTelemetryService.EvidenceDuration.Record(
+                duration.Value.TotalSeconds,
+                new TagList { { "agent.evidence.verified", verified } });
+        }
+        if (attempt > 1)
+            AgentTelemetryService.EvidenceRetries.Add(1);
         _activity?.SetTag("agent.response.schema.version",
             StructuredAgentResponseService.SchemaVersion);
         _activity?.SetTag("agent.response.validation.attempt", attempt);

@@ -45,6 +45,7 @@ coverage.*
 *.log
 *.tmp
 *.bak
+benchmarks/results/
 
 # Operating system files
 .DS_Store

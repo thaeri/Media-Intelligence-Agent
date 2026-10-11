@@ -50,6 +50,8 @@ flow. Audience metric definitions are documented in
 [Privacy-safe audience identity metrics](docs/audience-identity-metrics.md).
 Campaign definitions are documented in
 [Campaign-aware audience metrics](docs/campaign-metrics.md).
+Reproducible local load-test methodology and measured results are in
+[Performance benchmarks](docs/performance.md).
 
 ## Technology stack
 
@@ -105,6 +107,28 @@ status attributes. It does not record prompts, model responses, tool payloads,
 credentials, raw device IDs, or audience IDs. Anonymous Grafana access and the
 example database password are local-development conveniences, not production
 security settings. See [Local observability](docs/observability.md).
+
+## Reproducible local benchmarks
+
+Step 17B adds an opt-in k6 profile comparing the identical synthetic fixtures
+through InMemory and PostgreSQL storage. It covers catalog, content analytics,
+campaign analytics, the complete agent tool/evidence path, one bounded retry,
+and repeated-invalid fail-closed behavior. The deterministic chat stub is
+enabled only by `Benchmark:Enabled` in Development; startup rejects that switch
+in every other environment. It never calls Ollama or a paid provider.
+
+```powershell
+$env:POSTGRES_PASSWORD = "<local-development-password>"
+docker compose -f compose.yaml -f compose.benchmark.yaml `
+  --profile benchmark up --build -d postgres migrate api api-memory
+docker compose -f compose.yaml -f compose.benchmark.yaml `
+  --profile benchmark run --rm k6
+```
+
+Use `BENCHMARK_BASE_URL`, `BENCHMARK_STORAGE`, and `BENCHMARK_MODE` to select
+`api`, `agent-success`, `agent-retry`, or `agent-failure`; full commands and
+interpretation guidance are in [docs/performance.md](docs/performance.md).
+Generated JSON summaries remain untracked under `benchmarks/results/`.
 
 ## Windows setup
 
@@ -436,7 +460,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 116 tests covering:
+The current offline suite contains 120 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
@@ -550,7 +574,8 @@ observations are single runs, not comparative benchmarks.
   Foundry project/agent APIs and provider-specific features are out of scope.
 - OpenAI and Foundry availability, deployment permissions, quotas, latency,
   and cost depend on the configured cloud account.
-- Activities are not exported or persisted.
+- OpenTelemetry export is disabled by default; optional local Tempo and
+  Prometheus retention is development-only and volume-bound.
 - There is currently no license file; public reuse terms are therefore not
   granted until the repository owner selects a license.
 

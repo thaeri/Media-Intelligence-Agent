@@ -132,6 +132,23 @@ Prometheus, Tempo, and PostgreSQL have no host-published ports; only the API and
 Grafana bind to loopback. See [observability.md](observability.md) for startup,
 versions, and verification commands.
 
+## Optional benchmark path
+
+`compose.benchmark.yaml` adds a second API instance using `InMemory` storage and
+a pinned k6 runner. The base API continues to use PostgreSQL; both read the same
+stable synthetic fixture IDs and values. The override explicitly enables a
+Development-only benchmark controller that exposes aggregate campaign
+analytics and an OpenAI-compatible deterministic chat stub. `MediaAgentService`
+still uses the normal SDK client and therefore executes its real tool loop,
+structured evidence validation, retry, privacy checks, telemetry, and renderer.
+
+`Benchmark:Enabled` causes startup failure outside Development. When disabled,
+the benchmark routes return 404. The stub has no provider credentials or
+network dependency and is never registered by the default Compose file.
+Repository operations are wrapped by `InstrumentedMediaRepository`, which
+records bounded provider/operation/outcome latency labels without query values
+or identity data.
+
 ## Hybrid semantic discovery
 
 `search_media_content` combines exact pgvector cosine similarity with

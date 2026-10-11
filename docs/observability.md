@@ -45,6 +45,10 @@ p50/p95/p99, LLM p95 by provider, tool p95 and error count, and evidence
 verification failure count. Exemplars on latency charts navigate to Tempo when
 Prometheus has a trace-bearing sample. Tempo's data source also maps
 `service.name` to Prometheus `service_name` for trace-to-metrics queries.
+Additional panels show structured-evidence latency/retries and repository
+operation p95 by storage provider. Explicit sub-second histogram buckets make
+local deterministic benchmark latency visible without changing the default
+disabled-export behavior.
 
 ## Privacy and local security
 

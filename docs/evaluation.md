@@ -5,7 +5,7 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The ordinary offline suite contains 117 xUnit tests. They do not call Ollama,
+The ordinary offline suite contains 120 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 Two additional real-PostgreSQL tests cover repository parity and pgvector
 search; they are skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
@@ -88,6 +88,16 @@ Grafana provisioned healthy Prometheus and Tempo data sources and the Media
 Intelligence Agent Observability dashboard. This local ingestion check made no
 LLM or paid-cloud request. Custom agent panels populate when agent requests are
 made; their instruments are also covered by deterministic offline tests.
+
+### Reproducible performance evaluation
+
+The optional k6 profile uses a warm-up phase followed by fixed concurrency and
+keeps generated summaries out of Git. It compares the same fixtures through
+InMemory and PostgreSQL, then exercises the actual agent tool/evidence pipeline
+through a Development-only deterministic local chat stub. Retry and
+repeated-invalid scenarios prove bounded correction and fail-closed behavior
+without contacting an LLM. Results and caveats are reported in
+[performance.md](performance.md).
 
 ### LLM provider configuration
 

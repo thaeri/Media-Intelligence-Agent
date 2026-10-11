@@ -11,6 +11,13 @@ using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var benchmarkEnabled = builder.Configuration.GetValue<bool>("Benchmark:Enabled");
+if (benchmarkEnabled && !builder.Environment.IsDevelopment())
+{
+    throw new InvalidOperationException(
+        "The deterministic benchmark stub is restricted to Development.");
+}
+
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks()
@@ -20,6 +27,9 @@ if (builder.Configuration.GetValue<bool>("Observability:Enabled"))
 {
     var otlpEndpoint = builder.Configuration.GetValue<string>(
         "Observability:OtlpEndpoint") ?? "http://localhost:4317";
+    double[] latencyBuckets =
+        [0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01,
+         0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
     builder.Services.AddOpenTelemetry()
         .ConfigureResource(resource => resource.AddService(
             serviceName: "media-intelligence-api",
@@ -41,6 +51,16 @@ if (builder.Configuration.GetValue<bool>("Observability:Enabled"))
             .SetExemplarFilter(ExemplarFilterType.TraceBased)
             .AddAspNetCoreInstrumentation()
             .AddMeter(AgentTelemetryService.MeterName)
+            .AddView("media.agent.request.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
+            .AddView("media.agent.llm.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
+            .AddView("media.agent.tool.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
+            .AddView("media.agent.evidence.verification.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
+            .AddView("media.storage.operation.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
             .AddOtlpExporter(options =>
             {
                 options.Endpoint = new Uri(otlpEndpoint);
@@ -83,12 +103,20 @@ if (storageProvider == StorageProvider.PostgreSQL)
 
     builder.Services.AddDbContext<MediaIntelligenceDbContext>(options =>
         options.UseNpgsql(connectionString, npgsql => npgsql.UseVector()));
-    builder.Services.AddScoped<IMediaRepository, PostgreSqlMediaRepository>();
+    builder.Services.AddScoped<PostgreSqlMediaRepository>();
+    builder.Services.AddScoped<IMediaRepository>(serviceProvider =>
+        new InstrumentedMediaRepository(
+            serviceProvider.GetRequiredService<PostgreSqlMediaRepository>(),
+            nameof(StorageProvider.PostgreSQL)));
     builder.Services.AddScoped<IMediaEmbeddingStore, PostgreSqlMediaEmbeddingStore>();
 }
 else
 {
-    builder.Services.AddSingleton<IMediaRepository, SyntheticMediaRepository>();
+    builder.Services.AddSingleton<SyntheticMediaRepository>();
+    builder.Services.AddSingleton<IMediaRepository>(serviceProvider =>
+        new InstrumentedMediaRepository(
+            serviceProvider.GetRequiredService<SyntheticMediaRepository>(),
+            nameof(StorageProvider.InMemory)));
     builder.Services.AddSingleton<IMediaEmbeddingStore, EmptyMediaEmbeddingStore>();
 }
 
