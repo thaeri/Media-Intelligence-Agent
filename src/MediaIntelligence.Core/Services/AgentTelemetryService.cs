@@ -109,6 +109,19 @@ public sealed class AgentRequestTelemetry : IDisposable
             duration.TotalMilliseconds);
     }
 
+    public void RecordStructuredValidation(int attempt, bool verified)
+    {
+        _activity?.SetTag("agent.response.schema.version",
+            StructuredAgentResponseService.SchemaVersion);
+        _activity?.SetTag("agent.response.validation.attempt", attempt);
+        _activity?.SetTag("agent.response.validation.verified", verified);
+        _logger.LogInformation(
+            "Structured response validation attempt {ValidationAttempt} " +
+            "finished; verified: {EvidenceVerified}",
+            attempt,
+            verified);
+    }
+
     public void Complete(bool evidenceVerified)
     {
         Finish("completed", evidenceVerified, null);

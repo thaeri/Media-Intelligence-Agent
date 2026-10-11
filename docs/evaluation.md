@@ -5,7 +5,7 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The ordinary offline suite contains 95 xUnit tests. They do not call Ollama,
+The ordinary offline suite contains 116 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 Two additional real-PostgreSQL tests cover repository parity and pgvector
 search; they are skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
@@ -17,6 +17,14 @@ stale/missing/incompatible handling, aggregate-only tool output, privacy, and
 fail-closed unsupported-number rejection. The PostgreSQL test verifies the
 extension, migration, persisted refresh, database cosine query, and City
 Stories ranking first for `family drama city`.
+
+Structured-response evaluation covers captured Foundry-style JSON, strict
+version and unknown-field rejection, exact execution references, fabricated
+numbers, wrong entity/metric/unit attribution, recomputed signed comparisons,
+reversed direction, zero deltas, malformed/deep/oversized payloads, raw identity
+IDs, markup/injection fields, deterministic rendering, and one bounded retry.
+These are offline validations; Step 16 has not been revalidated by a live
+Ollama, OpenAI, or Foundry request.
 
 The Docker Compose test profile supplies that connection internally without
 publishing PostgreSQL to the host. Ordinary CI remains database-independent.
@@ -222,8 +230,11 @@ normal API responses, or tracked repository files.
   measurement exists.
 - `ActivitySource` behavior is unit-tested, but no exporter integration is
   configured or evaluated.
-- Evidence matching is deterministic and lexical; it does not prove semantic
-  equivalence beyond supported numeric, metric, and title patterns.
+- Structured responses intentionally support only the documented canonical
+  metrics and deterministic rendering; arbitrary narrative is not returned.
+- Provider-side strict JSON schema is requested for OpenAI and Foundry but has
+  not been live-tested for Step 16. Ollama uses JSON mode plus the same local
+  validator because strict-schema endpoint support is not assumed.
 - Synthetic consent has no time, purpose, policy, or jurisdiction dimension.
 - Campaign measurement supports campaign and optional UTC-window segmentation,
   but no creative, placement, budget, conversion, revenue, or advertiser

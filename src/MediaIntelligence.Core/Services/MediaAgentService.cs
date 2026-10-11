@@ -19,6 +19,8 @@ public sealed class MediaAgentService
     private readonly EvidenceReviewerService _evidenceReviewer;
     private readonly AgentTelemetryService _telemetry;
     private readonly IMediaSearchService? _mediaSearch;
+    private readonly StructuredAgentResponseService _structuredResponses;
+    private readonly LlmClientMetadata _llmMetadata;
 
     private static readonly ChatTool AnalyticsTool =
         ChatTool.CreateFunctionTool(
@@ -166,7 +168,9 @@ public sealed class MediaAgentService
         ICampaignAnalytics campaignAnalytics,
         EvidenceReviewerService evidenceReviewer,
         AgentTelemetryService telemetry,
-        IMediaSearchService? mediaSearch = null)
+        IMediaSearchService? mediaSearch = null,
+        StructuredAgentResponseService? structuredResponses = null,
+        LlmClientMetadata? llmMetadata = null)
     {
         _client = client;
         _repository = repository;
@@ -176,6 +180,9 @@ public sealed class MediaAgentService
         _evidenceReviewer = evidenceReviewer;
         _telemetry = telemetry;
         _mediaSearch = mediaSearch;
+        _structuredResponses = structuredResponses ?? new StructuredAgentResponseService();
+        _llmMetadata = llmMetadata ?? new LlmClientMetadata(
+            nameof(LlmProvider.Ollama), "unknown", TimeSpan.Zero);
     }
 
     public async Task<string> AskAsync(
@@ -248,12 +255,22 @@ inclusive and UTC end as exclusive. Never expose identity identifiers.
 10. For media discovery, call search_media_content. Do not report retrieval
 scores or ranks as business metrics. Only make numerical analytics claims
 that appear in its result.
+11. Your final response must be only JSON matching structured_agent_response_v1.
+Use evidence references exactly as supplied by tool results. Never put prose,
+Markdown, identifiers, or facts outside structured claims. Metric claims require
+comparison=null. Comparison claims require explicit left/right operands and the
+signed value left minus right. Supported canonical metrics are viewing_sessions,
+completion_rate, ad_exposure_rate, exposure_events, eligible_impressions, reach,
+frequency, eligible_coverage, total_impressions, and exclusion metrics.
 
 Available content catalog:
 {JsonSerializer.Serialize(catalog)}
 
 Available campaign catalog:
 {JsonSerializer.Serialize(campaignCatalog)}
+
+Strict response schema:
+{StructuredAgentResponseService.JsonSchema}
 """;
 
         var messages = new List<ChatMessage>
@@ -270,9 +287,22 @@ Available campaign catalog:
         options.Tools.Add(CampaignPerformanceTool);
         options.Tools.Add(CampaignComparisonTool);
         options.Tools.Add(MediaSearchTool);
-        var toolResults = new List<string>();
+        options.ResponseFormat = string.Equals(
+            _llmMetadata.Provider,
+            nameof(LlmProvider.Ollama),
+            StringComparison.OrdinalIgnoreCase)
+            ? ChatResponseFormat.CreateJsonObjectFormat()
+            : ChatResponseFormat.CreateJsonSchemaFormat(
+                "structured_agent_response_v1",
+                StructuredAgentResponseService.JsonSchema,
+                jsonSchemaFormatDescription:
+                    "Versioned evidence-bound media analytics response",
+                jsonSchemaIsStrict: true);
+        var toolExecutions = new List<ToolExecutionEvidence>();
+        var validationAttempts = 0;
+        var toolCallRounds = 0;
 
-        for (var round = 0; round < 5; round++)
+        for (var round = 0; round < 7; round++)
         {
             var roundNumber = round + 1;
             var roundStartedAt = Stopwatch.GetTimestamp();
@@ -303,10 +333,30 @@ Available campaign catalog:
                         .Where(c => c.Text is not null)
                         .Select(c => c.Text));
 
-                var finalized = FinalizeResponse(response, toolResults);
+                validationAttempts++;
+                var validated = _structuredResponses.Validate(
+                    response, toolExecutions);
+                telemetry.RecordStructuredValidation(
+                    validationAttempts, validated.IsValid);
+                if (validated.IsValid)
+                {
+                    telemetry.Complete(true);
+                    return _structuredResponses.Render(validated.Response!);
+                }
 
-                telemetry.Complete(finalized.Review.IsVerified);
-                return finalized.Response;
+                if (!StructuredAgentResponseService.CanRetry(validationAttempts))
+                {
+                    telemetry.Complete(false);
+                    return StructuredAgentResponseService.CreateFailureResponse();
+                }
+
+                messages.Add(new AssistantChatMessage(completion));
+                messages.Add(new UserChatMessage(
+                    "The response failed deterministic schema or evidence " +
+                    "validation. Return a corrected JSON object only. Reuse " +
+                    "only supplied evidence references and values; do not add " +
+                    "new claims or prose."));
+                continue;
             }
 
             if (completion.FinishReason !=
@@ -317,6 +367,10 @@ Available campaign catalog:
             }
 
             messages.Add(new AssistantChatMessage(completion));
+            toolCallRounds++;
+            if (toolCallRounds > 5)
+                throw new InvalidOperationException(
+                    "Agent exceeded the maximum tool-call rounds.");
 
 
             foreach (var call in completion.ToolCalls)
@@ -337,17 +391,55 @@ Available campaign catalog:
                         Stopwatch.GetElapsedTime(toolStartedAt));
                 }
 
-                toolResults.Add(result);
+                var evidenceReference = $"tool-{toolExecutions.Count + 1}";
+                toolExecutions.Add(new ToolExecutionEvidence(
+                    evidenceReference,
+                    call.FunctionName,
+                    result));
 
                 messages.Add(new ToolChatMessage(
                     call.Id,
-                    result));
+                    CreateToolEvidenceEnvelope(
+                        evidenceReference,
+                        call.FunctionName,
+                        result)));
             }
 
         }
 
         throw new InvalidOperationException(
             "Agent exceeded the maximum tool-call rounds.");
+    }
+
+    internal StructuredResponseValidationResult ValidateStructuredResponse(
+        string response,
+        IReadOnlyCollection<ToolExecutionEvidence> executions) =>
+        _structuredResponses.Validate(response, executions);
+
+    internal string RenderStructuredResponse(StructuredAgentResponse response) =>
+        _structuredResponses.Render(response);
+
+    private static string CreateToolEvidenceEnvelope(
+        string reference,
+        string toolName,
+        string payload)
+    {
+        JsonElement data;
+        try
+        {
+            data = JsonSerializer.Deserialize<JsonElement>(payload);
+        }
+        catch (JsonException)
+        {
+            data = JsonSerializer.SerializeToElement(new { error = "Malformed tool result" });
+        }
+
+        return JsonSerializer.Serialize(new
+        {
+            EvidenceRef = reference,
+            Tool = toolName,
+            Data = data
+        });
     }
 
     private string ExecuteTool(ChatToolCall call)

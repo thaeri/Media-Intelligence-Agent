@@ -144,7 +144,7 @@ sequenceDiagram
     participant T as AgentTelemetryService
     participant L as Selected LLM provider
     participant D as Deterministic tool
-    participant E as EvidenceReviewerService
+    participant E as Structured response validator
 
     C->>A: POST /api/agent/ask
     A->>M: AskAsync(question)
@@ -154,11 +154,12 @@ sequenceDiagram
     M->>D: Execute local analytics
     D-->>M: Aggregate synthetic JSON
     M->>L: Tool result
-    L-->>M: Draft answer
-    M->>E: Verify numeric claims by metric and title
+    L-->>M: Schema v1 JSON claims
+    M->>E: Bind claims to exact tool executions
+    E->>E: Validate units and recompute deltas
     alt All claims supported
         E-->>M: Verified
-        M-->>A: Draft answer
+        M-->>A: Deterministically rendered answer
     else Unsupported claim
         E-->>M: Rejected claims
         M-->>A: Verification-failure response
@@ -167,8 +168,9 @@ sequenceDiagram
     A-->>C: HTTP 200 with answer
 ```
 
-The loop is bounded to five LLM rounds. Evidence review is local and does not
-trigger another model request.
+Tool use remains bounded to five rounds. Final response validation permits one
+corrective retry. A second invalid response is discarded and replaced with a
+fixed verification-failure answer.
 
 ## Deterministic analytics
 
@@ -216,11 +218,15 @@ number from another campaign or metric cannot support a claim.
 
 ## Evidence boundary
 
-`EvidenceReviewerService` parses numeric values from tool JSON and numeric
-claims from the draft answer. It checks values with display-rounding tolerance
-and constrains matches by recognized metric and nearby title/cohort. Unsupported
-claims cause the entire model draft to be replaced before the controller
-creates the public `{ "answer": ... }` response.
+Schema `1.0` contains typed sections and metric/comparison claims only. Claims
+carry entity type/name, canonical metric, numeric value, unit, and exact tool
+execution references. Comparisons carry two fully attributed operands. The
+validator resolves only those references, verifies source values, and computes
+signed delta and direction itself. Unknown fields/versions and malformed,
+oversized, deeply nested, unsupported, wrongly attributed, or privacy-unsafe
+responses fail closed. The renderer emits fixed text from verified fields, so
+free-form narrative cannot bypass validation. `EvidenceReviewerService` remains
+in the codebase and regression suite for comparison, not as a fallback path.
 
 ## Telemetry and data minimization
 

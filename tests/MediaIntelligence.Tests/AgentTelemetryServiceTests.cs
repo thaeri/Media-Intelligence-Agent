@@ -33,6 +33,8 @@ public sealed class AgentTelemetryServiceTests
                     TimeSpan.FromMilliseconds(3));
             }
 
+            request.RecordStructuredValidation(1, verified: true);
+
             request.Complete(evidenceVerified: true);
         }
 
@@ -46,6 +48,9 @@ public sealed class AgentTelemetryServiceTests
         Assert.Equal(1, activity.GetTagItem("agent.llm.rounds"));
         Assert.Equal(1, activity.GetTagItem("agent.tool.calls"));
         Assert.Equal(true, activity.GetTagItem("agent.evidence.verified"));
+        Assert.Equal("1.0", activity.GetTagItem("agent.response.schema.version"));
+        Assert.Equal(1, activity.GetTagItem("agent.response.validation.attempt"));
+        Assert.Equal(true, activity.GetTagItem("agent.response.validation.verified"));
         Assert.NotNull(activity.GetTagItem("agent.duration.ms"));
 
         Assert.Contains(logger.Messages, message =>

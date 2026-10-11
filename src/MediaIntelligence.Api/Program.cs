@@ -136,6 +136,7 @@ builder.Services.AddSingleton<IEvidenceReviewDiagnostics>(serviceProvider =>
         TimeSpan.FromMinutes(options.RetentionMinutes));
 });
 builder.Services.AddScoped<EvidenceReviewerService>();
+builder.Services.AddSingleton<StructuredAgentResponseService>();
 builder.Services.AddScoped<AgentTelemetryService>();
 
 builder.Services.AddSingleton<IValidateOptions<LlmOptions>, LlmOptionsValidator>();

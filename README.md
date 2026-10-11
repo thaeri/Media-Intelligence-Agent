@@ -364,17 +364,24 @@ stored vectors, content hashes, or identity mappings.
 ## Evidence verification
 
 Before an agent answer crosses the response boundary,
-`EvidenceReviewerService` extracts numeric claims and checks them against the
-numeric JSON returned by tools. Matching is deterministic and accounts for:
+the model must return structured response schema version `1.0`. Each typed
+metric claim names its entity, canonical metric, value, unit, and one or more
+references to actual tool executions. Comparison claims additionally include
+both operands and direction. The application validates operand provenance and
+recomputes every delta before deterministic rendering.
 
-- Display rounding.
-- Metric attribution, such as reach versus frequency.
-- Title/cohort attribution, preventing one title from borrowing another
-  title's value.
-- Missing or malformed evidence.
+- Unknown fields, versions, metrics, units, or evidence references are rejected.
+- Fabricated values, reversed comparisons, and invalid attribution are rejected.
+- Raw device/audience IDs, GUIDs, markup, and control characters are rejected.
+- Payload size, JSON depth, section count, claim count, and reference count are bounded.
 
-If any numeric claim is unsupported, the draft is replaced by a deterministic
-verification-failure response. The reviewer does not make another LLM call.
+OpenAI and Foundry request the SDK's strict JSON-schema response format. Ollama
+uses JSON mode because endpoint-level strict-schema capability is not assumed;
+all providers receive identical application-side validation. One corrective
+retry is allowed. If it also fails, the draft is discarded and a fixed
+verification-failure answer is returned. Free-form model narrative is never
+rendered. The older `EvidenceReviewerService` remains covered for regression
+comparison but is not a fallback acceptance path.
 
 ## Privacy and consent model
 
@@ -392,7 +399,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 95 tests covering:
+The current offline suite contains 116 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
@@ -409,6 +416,9 @@ The current offline suite contains 95 tests covering:
 - Deterministic embeddings, hybrid ranking, thresholds, stable ordering,
   idempotent refresh, stale/missing/incompatible vectors, privacy, and evidence
   rejection. See [semantic search definitions](docs/semantic-search.md).
+- Structured schema/version rejection, exact tool-execution binding, metric and
+  unit attribution, recomputed comparisons including zero deltas, captured
+  Foundry-format JSON, injection/privacy rejection, limits, and bounded retry.
 
 Tests inject fake model text and never call Ollama, OpenAI, or Foundry. Provider
 tests validate selection and configuration without sending network requests. See
