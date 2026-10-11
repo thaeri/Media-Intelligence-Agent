@@ -605,7 +605,7 @@ Available campaign catalog:
     {
         try
         {
-            var results = _repository.GetCampaigns()
+            var measuredCampaigns = _repository.GetCampaigns()
                 .Select(campaign =>
                 {
                     var result = _campaignAnalytics.GetPerformance(
@@ -620,14 +620,20 @@ Available campaign catalog:
                 })
                 .OrderByDescending(item => item.Result.Metrics.Reach)
                 .ThenBy(item => item.Campaign.Name)
+                .ToArray();
+            var results = measuredCampaigns
                 .Select(item => CreateCampaignResult(item.Result, item.Title))
                 .ToArray();
+            var comparisons = CampaignComparisonCalculator.Calculate(
+                measuredCampaigns.Select(item => CreateCampaignSnapshot(
+                    item.Result)));
 
             return JsonSerializer.Serialize(new
             {
                 DataSource = "Synthetic campaign impressions and explicit " +
                     "pseudonymous associations",
                 Results = results,
+                Comparisons = comparisons,
                 Definitions = CampaignMetricDefinitions,
                 Limitations = CampaignMetricLimitations
             });
@@ -682,6 +688,15 @@ Available campaign catalog:
                     result.Metrics.Exclusions.ConsentMissing
             }
         };
+
+    private static CampaignMetricSnapshot CreateCampaignSnapshot(
+        CampaignPerformanceResult result) =>
+        new(
+            result.Campaign.Name,
+            result.Metrics.EligibleImpressions,
+            result.Metrics.Reach,
+            result.Metrics.Frequency,
+            result.Metrics.EligibleExposureCoverageRate);
 
     private static bool TryReadDateRange(
         JsonElement args,

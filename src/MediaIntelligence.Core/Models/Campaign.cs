@@ -27,3 +27,22 @@ public sealed record CampaignPerformanceResult(
     DateTime EffectiveStartUtc,
     DateTime EffectiveEndUtc,
     CampaignPerformanceMetrics Metrics);
+
+public sealed record CampaignMetricSnapshot(
+    string CampaignName,
+    int EligibleImpressions,
+    int Reach,
+    double Frequency,
+    double EligibleExposureCoverageRate);
+
+public sealed record CampaignMetricComparison(
+    string CampaignName,
+    string ComparedWithCampaignName,
+    double EligibleImpressionsDifference,
+    string EligibleImpressionsDirection,
+    double ReachDifference,
+    string ReachDirection,
+    double FrequencyDifference,
+    string FrequencyDirection,
+    double CoveragePercentagePointDifference,
+    string CoverageDirection);

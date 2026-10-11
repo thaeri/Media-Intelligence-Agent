@@ -81,6 +81,19 @@ public sealed class CampaignAgentIntegrationTests
         Assert.Equal(
             2,
             document.RootElement.GetProperty("Results").GetArrayLength());
+        var comparisons = document.RootElement.GetProperty("Comparisons");
+        Assert.Equal(2, comparisons.GetArrayLength());
+        var desertToCity = Assert.Single(
+            comparisons.EnumerateArray(),
+            item => item.GetProperty("CampaignName").GetString() == "Desert Heroes Encore");
+        Assert.Equal(
+            "City Stories Launch",
+            desertToCity.GetProperty("ComparedWithCampaignName").GetString());
+        Assert.Equal(1, desertToCity.GetProperty("EligibleImpressionsDifference").GetDouble());
+        Assert.Equal(0, desertToCity.GetProperty("ReachDifference").GetDouble());
+        Assert.Equal(0.5, desertToCity.GetProperty("FrequencyDifference").GetDouble());
+        Assert.Equal(10, desertToCity.GetProperty("CoveragePercentagePointDifference").GetDouble());
+        Assert.Equal("Higher", desertToCity.GetProperty("CoverageDirection").GetString());
         Assert.False(ContainsIdentityProperty(document.RootElement));
         AssertNoIdentityLeakage(repository, response);
     }
