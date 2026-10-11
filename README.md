@@ -253,7 +253,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 62 tests covering:
+The current offline suite contains 85 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
@@ -298,17 +298,22 @@ credentials into request bodies, logs, or tracked settings files.
 
 ### Provider validation status
 
-| Provider | Offline configuration | Live agent flow | Authentication tested |
+| Provider | Offline configuration | Live validation | Authentication tested |
 | --- | --- | --- | --- |
-| Ollama | Passed | Passed | Local placeholder credential |
+| Ollama | Passed | Content comparison and identity flows passed | Local placeholder credential |
 | OpenAI | Passed | Not run | Not run |
-| Microsoft Foundry | Passed | Passed | Microsoft Entra ID |
+| Microsoft Foundry | Passed | Identity flow passed; campaign tools executed, but live campaign evidence verification did not pass | Microsoft Entra ID |
 
-The Foundry smoke test exercised startup validation, provider selection, two
-LLM rounds, `get_audience_identity_metrics`, evidence verification, and the
-public response boundary. It used a configured `/openai/v1/` inference endpoint
-without persisting credentials or cloud resource identifiers. OpenAI remains
-offline-tested only; no paid OpenAI request has been made.
+The successful Foundry identity smoke test exercised startup validation,
+provider selection, two LLM rounds, `get_audience_identity_metrics`, evidence
+verification, and the public response boundary. Separate Foundry campaign
+comparison smoke tests successfully executed the campaign tools and returned
+the expected aggregate values, but their final drafts did not pass live
+evidence verification. The redacted rejected drafts were captured and added as
+exact deterministic offline regressions; all now pass. The final evidence fixes
+have not been revalidated by another live cloud request. No credentials or
+cloud resource identifiers were persisted. OpenAI remains offline-tested only;
+no paid OpenAI request has been made.
 
 ## Measured smoke observations
 
@@ -322,7 +327,7 @@ performance benchmarks:
 | City Stories reach/frequency | 200 | 2 | `get_audience_identity_metrics` | 28.7 ms | 607.7 s |
 | City Stories reach/frequency (Foundry) | 200 | 2 | `get_audience_identity_metrics` | 11.9 ms | 19.24 s |
 
-Both runs completed with evidence verification passing. The identity run
+Both Ollama runs completed with evidence verification passing. The identity run
 produced deterministic tool values of reach `2` and frequency `15.5`. Its HTTP
 body could not be retained by the Windows PowerShell 5 smoke client after the
 server returned 200, so final-response privacy is additionally covered by the
@@ -330,7 +335,11 @@ offline boundary integration test rather than claimed from that capture.
 
 The Foundry run returned the same deterministic reach `2` and frequency
 `15.5`, passed evidence verification, and contained no raw device or audience
-identifiers. These observations are single runs, not comparative benchmarks.
+identifiers. The later Foundry campaign comparison attempts are excluded from
+this performance table: their tool execution succeeded, but final live evidence
+verification failed. Their exact redacted drafts now pass offline regression
+tests; the final fixes have not received another live cloud validation. These
+observations are single runs, not comparative benchmarks.
 
 ## Limitations
 

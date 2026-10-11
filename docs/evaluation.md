@@ -5,7 +5,7 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The repository currently contains 62 xUnit tests. They do not call Ollama,
+The repository currently contains 85 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 
 ### Deterministic analytics
@@ -100,7 +100,7 @@ receipt, so that response body was not retained. The deterministic offline
 boundary test closes the response-privacy verification gap; the live result is
 not presented as direct body-inspection evidence.
 
-## Live Microsoft Foundry smoke observation
+## Live Microsoft Foundry smoke observations
 
 One manual smoke test was run against a configured Microsoft Foundry chat
 deployment using Microsoft Entra ID. Endpoint, tenant, subscription, resource,
@@ -124,6 +124,26 @@ multi-tenant environment. Explicitly selecting the resource tenant for
 then exposed an insufficient 300-token completion ceiling for the cloud model;
 raising the existing ceiling to 1,000 allowed the grounded final response to
 complete. Both conditions failed visibly without provider fallback.
+
+### Campaign comparison status
+
+Controlled Foundry campaign-comparison requests completed provider
+authentication, two LLM rounds, and the expected campaign tool execution. The
+tools returned the deterministic City Stories Launch and Desert Heroes Encore
+aggregates, including their attributed reach, frequency, coverage, and
+comparison differences. No raw device or audience identifiers appeared in the
+captured response or telemetry.
+
+The final campaign drafts did not pass live evidence verification. Formatting
+used by the model exposed deterministic parsing gaps involving comparison
+headings and metric labels followed by parenthetical definitions. Local-only
+diagnostics captured redacted copies of the rejected drafts outside the
+repository. Those exact drafts were converted into offline regression tests,
+and all 85 offline tests now pass with the corrected attribution rules.
+
+This establishes successful live Foundry tool execution and successful exact
+offline reproduction, not a successful live campaign response boundary. The
+final evidence fixes have not been revalidated by another live cloud request.
 
 ## Local rejected-draft diagnostics
 
