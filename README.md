@@ -26,6 +26,8 @@ customer data, real device identifiers, or probabilistic identity matching.
   with optional UTC windows.
 - Structured request, LLM-round, and tool-call telemetry using `ILogger` and
   `System.Diagnostics.ActivitySource`.
+- Hybrid media discovery using pgvector cosine similarity plus deterministic
+  title/tag retrieval, explicit indexing, and safe lexical fallback.
 - Offline evaluation and regression tests that never call Ollama or OpenAI.
 
 ## Architecture
@@ -192,8 +194,14 @@ Compose network:
 docker compose --profile test run --rm integration-tests
 ```
 
-Confirm the image supplies pgvector without enabling embeddings or vector
-search in the application:
+Create or refresh deterministic local media embeddings explicitly (this is not
+part of the default stack and makes no network or paid-model call):
+
+```powershell
+docker compose --profile search run --rm index-media
+```
+
+Confirm the image supplies pgvector:
 
 ```powershell
 docker compose exec postgres psql -U media_app -d media_intelligence_test -c "SELECT name, default_version FROM pg_available_extensions ORDER BY name;"
@@ -347,9 +355,11 @@ deterministic analytics endpoints do not make an LLM call.
 | `get_audience_identity_metrics` | Aggregate cross-device reach, frequency, coverage, and exclusion counts for one title. |
 | `get_campaign_performance` | Consent-aware impression, reach, frequency, coverage, and exclusions for one campaign and optional UTC window. |
 | `compare_campaign_performance` | Aggregate comparison across synthetic campaigns for an optional UTC window. |
+| `search_media_content` | Ordered hybrid semantic/title/tag discovery with existing aggregate viewing analytics. |
 
 Tool results use synthetic aggregates. The audience identity tool never returns
-raw `DeviceId` or `AudienceId` values to the model.
+raw `DeviceId` or `AudienceId` values to the model. Search results never return
+stored vectors, content hashes, or identity mappings.
 
 ## Evidence verification
 
@@ -382,7 +392,7 @@ divided by reached audiences, with zero returned for a zero denominator.
 
 ## Testing and evaluation
 
-The current offline suite contains 89 tests covering:
+The current offline suite contains 95 tests covering:
 
 - Completion and advertising-exposure calculations.
 - Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
@@ -396,6 +406,9 @@ The current offline suite contains 89 tests covering:
 - Campaign filtering, cross-device deduplication, consent exclusions, UTC
   boundaries, zero denominators, unknown campaigns, evidence attribution,
   identifier non-disclosure, and API serialization.
+- Deterministic embeddings, hybrid ranking, thresholds, stable ordering,
+  idempotent refresh, stale/missing/incompatible vectors, privacy, and evidence
+  rejection. See [semantic search definitions](docs/semantic-search.md).
 
 Tests inject fake model text and never call Ollama, OpenAI, or Foundry. Provider
 tests validate selection and configuration without sending network requests. See

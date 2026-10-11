@@ -5,11 +5,18 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The ordinary offline suite contains 89 xUnit tests. They do not call Ollama,
+The ordinary offline suite contains 95 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
-One additional real-PostgreSQL migration, idempotency, and metric-parity test
-is skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
+Two additional real-PostgreSQL tests cover repository parity and pgvector
+search; they are skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
 database. It uses Npgsql rather than EF's in-memory provider.
+
+Semantic-search evaluation covers deterministic vectors, hybrid ranking,
+top-K/threshold validation, stable ordering, idempotent refresh,
+stale/missing/incompatible handling, aggregate-only tool output, privacy, and
+fail-closed unsupported-number rejection. The PostgreSQL test verifies the
+extension, migration, persisted refresh, database cosine query, and City
+Stories ranking first for `family drama city`.
 
 The Docker Compose test profile supplies that connection internally without
 publishing PostgreSQL to the host. Ordinary CI remains database-independent.

@@ -71,7 +71,23 @@ services:
       MEDIAINTELLIGENCE_TEST_POSTGRES: Host=postgres;Port=5432;Database=${POSTGRES_DB:-media_intelligence_test};Username=${POSTGRES_USER:-media_app};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     command:
       - --filter
-      - FullyQualifiedName~PostgreSqlRepositoryIntegrationTests
+      - FullyQualifiedName~PostgreSql
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  index-media:
+    profiles: ["search"]
+    build:
+      context: .
+      target: runtime
+    environment: *api-environment
+    command: ["--index-media"]
     depends_on:
       postgres:
         condition: service_healthy

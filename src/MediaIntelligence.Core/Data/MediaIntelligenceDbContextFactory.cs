@@ -17,7 +17,7 @@ public sealed class MediaIntelligenceDbContextFactory
         }
 
         var options = new DbContextOptionsBuilder<MediaIntelligenceDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql(connectionString, npgsql => npgsql.UseVector())
             .Options;
         return new MediaIntelligenceDbContext(options);
     }

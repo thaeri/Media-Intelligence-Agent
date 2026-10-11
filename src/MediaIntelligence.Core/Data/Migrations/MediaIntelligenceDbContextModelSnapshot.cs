@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
+using Pgvector;
 
 #nullable disable
 
@@ -21,6 +22,7 @@ namespace MediaIntelligence.Core.Data.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
 
             modelBuilder.Entity("MediaIntelligence.Core.Data.AdImpressionEntity", b =>
                 {
@@ -171,6 +173,45 @@ namespace MediaIntelligence.Core.Data.Migrations
                     b.ToTable("media_content", (string)null);
                 });
 
+            modelBuilder.Entity("MediaIntelligence.Core.Data.MediaEmbeddingEntity", b =>
+                {
+                    b.Property<Guid>("ContentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("ContentVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Dimension")
+                        .HasColumnType("integer");
+
+                    b.Property<Vector>("Embedding")
+                        .IsRequired()
+                        .HasColumnType("vector");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("ContentId", "Model");
+
+                    b.HasIndex("Model", "Dimension");
+
+                    b.ToTable("media_embedding", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_media_embedding_content_version", "\"ContentVersion\" > 0");
+
+                            t.HasCheckConstraint("CK_media_embedding_dimension", "\"Dimension\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("MediaIntelligence.Core.Data.ViewingEventEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -255,6 +296,15 @@ namespace MediaIntelligence.Core.Data.Migrations
                     b.HasOne("MediaIntelligence.Core.Data.AudienceEntity", null)
                         .WithMany()
                         .HasForeignKey("AudienceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("MediaIntelligence.Core.Data.MediaEmbeddingEntity", b =>
+                {
+                    b.HasOne("MediaIntelligence.Core.Data.MediaContentEntity", null)
+                        .WithMany()
+                        .HasForeignKey("ContentId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

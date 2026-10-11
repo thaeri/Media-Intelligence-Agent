@@ -18,6 +18,7 @@ public sealed class MediaAgentService
     private readonly ICampaignAnalytics _campaignAnalytics;
     private readonly EvidenceReviewerService _evidenceReviewer;
     private readonly AgentTelemetryService _telemetry;
+    private readonly IMediaSearchService? _mediaSearch;
 
     private static readonly ChatTool AnalyticsTool =
         ChatTool.CreateFunctionTool(
@@ -136,6 +137,26 @@ public sealed class MediaAgentService
 }
 """));
 
+    private static readonly ChatTool MediaSearchTool =
+        ChatTool.CreateFunctionTool(
+            functionName: "search_media_content",
+            functionDescription:
+                "Discover synthetic media titles using hybrid semantic and " +
+                "title/tag retrieval. Returns catalog metadata and existing " +
+                "deterministic content analytics, never embeddings or identity IDs.",
+            functionParameters: BinaryData.FromString("""
+{
+  "type": "object",
+  "properties": {
+    "query": { "type": "string", "description": "Search text" },
+    "topK": { "type": "integer", "minimum": 1, "maximum": 20 },
+    "similarityThreshold": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}
+"""));
+
 
     public MediaAgentService(
         ChatClient client,
@@ -144,7 +165,8 @@ public sealed class MediaAgentService
         IAudienceIdentityAnalytics identityAnalytics,
         ICampaignAnalytics campaignAnalytics,
         EvidenceReviewerService evidenceReviewer,
-        AgentTelemetryService telemetry)
+        AgentTelemetryService telemetry,
+        IMediaSearchService? mediaSearch = null)
     {
         _client = client;
         _repository = repository;
@@ -153,6 +175,7 @@ public sealed class MediaAgentService
         _campaignAnalytics = campaignAnalytics;
         _evidenceReviewer = evidenceReviewer;
         _telemetry = telemetry;
+        _mediaSearch = mediaSearch;
     }
 
     public async Task<string> AskAsync(
@@ -222,6 +245,9 @@ Never expose or request device identifiers. Clearly distinguish viewing
 sessions, exposure events, eligible impressions, reach, and frequency.
 9. For campaign questions, use only campaign tools. Treat UTC start as
 inclusive and UTC end as exclusive. Never expose identity identifiers.
+10. For media discovery, call search_media_content. Do not report retrieval
+scores or ranks as business metrics. Only make numerical analytics claims
+that appear in its result.
 
 Available content catalog:
 {JsonSerializer.Serialize(catalog)}
@@ -243,6 +269,7 @@ Available campaign catalog:
         options.Tools.Add(AudienceIdentityMetricsTool);
         options.Tools.Add(CampaignPerformanceTool);
         options.Tools.Add(CampaignComparisonTool);
+        options.Tools.Add(MediaSearchTool);
         var toolResults = new List<string>();
 
         for (var round = 0; round < 5; round++)
@@ -345,6 +372,11 @@ Available campaign catalog:
             return CompareCampaignPerformance(call);
         }
 
+        if (call.FunctionName == "search_media_content")
+        {
+            return SearchMediaContent(call);
+        }
+
         if (call.FunctionName != "get_content_analytics")
         {
             return JsonSerializer.Serialize(new
@@ -395,6 +427,77 @@ Available campaign catalog:
         {
             return """{"error":"Invalid tool arguments"}""";
         }
+    }
+
+    private string SearchMediaContent(ChatToolCall call)
+    {
+        if (_mediaSearch is null)
+            return """{"error":"Media search unavailable"}""";
+
+        try
+        {
+            using var args = JsonDocument.Parse(call.FunctionArguments);
+            var query = args.RootElement.GetProperty("query").GetString();
+            var topK = args.RootElement.TryGetProperty("topK", out var topKValue)
+                ? topKValue.GetInt32()
+                : 5;
+            var threshold = args.RootElement.TryGetProperty(
+                    "similarityThreshold", out var thresholdValue)
+                ? thresholdValue.GetDouble()
+                : 0.15;
+            return SearchMediaContent(query ?? string.Empty, topK, threshold);
+        }
+        catch (Exception exception) when (exception is JsonException or
+            KeyNotFoundException or ArgumentException)
+        {
+            return JsonSerializer.Serialize(new { error = exception.Message });
+        }
+    }
+
+    internal string SearchMediaContent(
+        string query,
+        int topK = 5,
+        double similarityThreshold = 0.15)
+    {
+        if (_mediaSearch is null)
+            return """{"error":"Media search unavailable"}""";
+
+        var results = _mediaSearch.Search(query, topK, similarityThreshold)
+            .Select(result =>
+            {
+                var events = _repository.GetViewingEvents(result.Content.Id);
+                return new
+                {
+                    result.Content.Title,
+                    result.Content.Genre,
+                    result.Content.ContentType,
+                    result.Content.Region,
+                    result.Content.Tags,
+                    SemanticStatus = result.SemanticStatus.ToString(),
+                    MatchReasons = result.MatchReasons,
+                    ViewingSessions = events.Count,
+                    CompletionRate = _analytics.GetCompletionRate(
+                        result.Content.Id, events),
+                    AdExposureRate = _analytics.GetAdExposureRate(
+                        result.Content.Id, events)
+                };
+            })
+            .ToArray();
+
+        return JsonSerializer.Serialize(new
+        {
+            DataSource = "Synthetic media catalog and deterministic analytics",
+            Results = results,
+            Ranking = "70% compatible fresh semantic similarity plus 30% " +
+                "title/tag lexical score; lexical-only fallback for missing, " +
+                "stale or incompatible embeddings; deterministic title/ID ties",
+            Limitations = new[]
+            {
+                "Synthetic data only",
+                "No raw embeddings or identity identifiers are exposed",
+                "The deterministic development embedding is not a production semantic model"
+            }
+        });
     }
 
     internal (string Response, EvidenceReviewResult Review) FinalizeResponse(

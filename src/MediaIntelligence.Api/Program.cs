@@ -46,13 +46,20 @@ if (storageProvider == StorageProvider.PostgreSQL)
     }
 
     builder.Services.AddDbContext<MediaIntelligenceDbContext>(options =>
-        options.UseNpgsql(connectionString));
+        options.UseNpgsql(connectionString, npgsql => npgsql.UseVector()));
     builder.Services.AddScoped<IMediaRepository, PostgreSqlMediaRepository>();
+    builder.Services.AddScoped<IMediaEmbeddingStore, PostgreSqlMediaEmbeddingStore>();
 }
 else
 {
     builder.Services.AddSingleton<IMediaRepository, SyntheticMediaRepository>();
+    builder.Services.AddSingleton<IMediaEmbeddingStore, EmptyMediaEmbeddingStore>();
 }
+
+builder.Services.AddSingleton<IMediaEmbeddingProvider,
+    DeterministicMediaEmbeddingProvider>();
+builder.Services.AddScoped<IMediaSearchService, MediaSearchService>();
+builder.Services.AddScoped<MediaEmbeddingIndexer>();
 
 builder.Services.AddScoped<
     MediaIntelligence.Core.Interfaces.IAudienceAnalytics,
@@ -164,6 +171,22 @@ if (args.Contains("--migrate-and-seed", StringComparer.Ordinal))
     var dbContext = scope.ServiceProvider
         .GetRequiredService<MediaIntelligenceDbContext>();
     await PostgreSqlDatabaseInitializer.MigrateAndSeedAsync(dbContext);
+    return;
+}
+
+if (args.Contains("--index-media", StringComparer.Ordinal))
+{
+    if (!app.Environment.IsDevelopment() ||
+        storageOptions.Provider != StorageProvider.PostgreSQL)
+    {
+        throw new InvalidOperationException(
+            "The media indexing command requires Development and PostgreSQL storage.");
+    }
+
+    await using var scope = app.Services.CreateAsyncScope();
+    var indexer = scope.ServiceProvider.GetRequiredService<MediaEmbeddingIndexer>();
+    var updated = indexer.Refresh();
+    app.Logger.LogInformation("Media embedding refresh completed; updated {Count} rows.", updated);
     return;
 }
 

@@ -99,10 +99,22 @@ storage, and Compose gates it on both database health and migration completion.
 An optional test-profile container runs the real Npgsql integration test on
 the private network.
 
-The PostgreSQL image includes pgvector for forward compatibility, but the
-application does not enable embeddings, vector columns, or similarity search.
+The PostgreSQL image includes pgvector. `media_embedding` stores one vector per
+content/model with dimension, source hash/version, and UTC refresh time. The
+default stack performs no embedding work; the `search` profile exposes the
+explicit Development-only indexing command after migration/seed.
 No Ollama service or model download is part of the Compose project. Ollama,
 OpenAI, and Foundry remain separately configured optional LLM providers.
+
+## Hybrid semantic discovery
+
+`search_media_content` combines exact pgvector cosine similarity with
+deterministic title/tag matching. Semantic rows must match model, dimension,
+source hash, and source version. Missing, stale, or incompatible rows use
+lexical fallback. Fresh rows rank at 70% semantic and 30% lexical, with title
+and stable content ID resolving ties. No vector, hash, device ID, audience ID,
+or identity mapping crosses the tool boundary. See
+[semantic-search.md](semantic-search.md) for the refresh contract and formulas.
 
 ## Provider registration and authentication
 

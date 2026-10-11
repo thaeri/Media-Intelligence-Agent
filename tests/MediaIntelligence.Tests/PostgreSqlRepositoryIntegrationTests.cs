@@ -19,7 +19,7 @@ public sealed class PostgreSqlRepositoryIntegrationTests
             StringComparison.OrdinalIgnoreCase);
 
         var options = new DbContextOptionsBuilder<MediaIntelligenceDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql(connectionString, npgsql => npgsql.UseVector())
             .Options;
         await using var dbContext = new MediaIntelligenceDbContext(options);
         await PostgreSqlDatabaseInitializer.MigrateAndSeedAsync(dbContext);

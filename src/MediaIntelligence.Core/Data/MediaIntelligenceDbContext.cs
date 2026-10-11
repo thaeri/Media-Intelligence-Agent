@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Pgvector;
 
 namespace MediaIntelligence.Core.Data;
 
@@ -18,9 +19,12 @@ public sealed class MediaIntelligenceDbContext : DbContext
     internal DbSet<AudienceConsentEntity> AudienceConsents => Set<AudienceConsentEntity>();
     internal DbSet<CampaignEntity> Campaigns => Set<CampaignEntity>();
     internal DbSet<AdImpressionEntity> AdImpressions => Set<AdImpressionEntity>();
+    internal DbSet<MediaEmbeddingEntity> MediaEmbeddings => Set<MediaEmbeddingEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.HasPostgresExtension("vector");
+
         modelBuilder.Entity<MediaContentEntity>(entity =>
         {
             entity.ToTable("media_content");
@@ -123,6 +127,28 @@ public sealed class MediaIntelligenceDbContext : DbContext
             entity.HasIndex(item => new { item.CampaignId, item.OccurredAtUtc });
             entity.HasIndex(item => item.ContentId);
         });
+
+        modelBuilder.Entity<MediaEmbeddingEntity>(entity =>
+        {
+            entity.ToTable("media_embedding");
+            entity.HasKey(item => new { item.ContentId, item.Model });
+            entity.Property(item => item.Model).HasMaxLength(200);
+            entity.Property(item => item.ContentHash).HasMaxLength(64);
+            entity.Property(item => item.UpdatedAtUtc)
+                .HasColumnType("timestamp with time zone");
+            entity.Property(item => item.Embedding).HasColumnType("vector");
+            entity.HasOne<MediaContentEntity>()
+                .WithMany()
+                .HasForeignKey(item => item.ContentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(item => new { item.Model, item.Dimension });
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_media_embedding_dimension",
+                "\"Dimension\" > 0"));
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_media_embedding_content_version",
+                "\"ContentVersion\" > 0"));
+        });
     }
 }
 
@@ -183,4 +209,15 @@ internal sealed class AdImpressionEntity
     public Guid ContentId { get; set; }
     public DateTime OccurredAtUtc { get; set; }
     public string? DeviceId { get; set; }
+}
+
+internal sealed class MediaEmbeddingEntity
+{
+    public Guid ContentId { get; set; }
+    public string Model { get; set; } = string.Empty;
+    public int Dimension { get; set; }
+    public string ContentHash { get; set; } = string.Empty;
+    public int ContentVersion { get; set; }
+    public DateTime UpdatedAtUtc { get; set; }
+    public Vector Embedding { get; set; } = new(Array.Empty<float>());
 }
