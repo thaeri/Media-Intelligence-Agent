@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
 
 namespace MediaIntelligence.Core.Services;
@@ -6,9 +7,22 @@ namespace MediaIntelligence.Core.Services;
 public sealed class AgentTelemetryService
 {
     public const string ActivitySourceName = "MediaIntelligence.Agent";
+    public const string MeterName = "MediaIntelligence.Agent";
 
     private static readonly ActivitySource ActivitySource =
         new(ActivitySourceName);
+    private static readonly Meter Meter = new(MeterName);
+    internal static readonly Histogram<double> RequestDuration = Meter.CreateHistogram<double>(
+        "media.agent.request.duration", "s", "Agent request duration");
+    internal static readonly Histogram<double> LlmDuration = Meter.CreateHistogram<double>(
+        "media.agent.llm.duration", "s", "LLM round duration");
+    internal static readonly Histogram<double> ToolDuration = Meter.CreateHistogram<double>(
+        "media.agent.tool.duration", "s", "Tool execution duration");
+    internal static readonly Counter<long> ToolErrors = Meter.CreateCounter<long>(
+        "media.agent.tool.errors", "{error}", "Tool execution failures");
+    internal static readonly Counter<long> EvidenceFailures = Meter.CreateCounter<long>(
+        "media.agent.evidence.verification.failures", "{failure}",
+        "Final evidence verification failures");
 
     private readonly ILogger<AgentTelemetryService> _logger;
     private readonly LlmClientMetadata _llm;
@@ -85,6 +99,14 @@ public sealed class AgentRequestTelemetry : IDisposable
         TimeSpan duration,
         string outcome)
     {
+        var tags = new TagList
+        {
+            { "gen_ai.provider.name", _llm.Provider },
+            { "gen_ai.request.model", _llm.Model },
+            { "agent.llm.outcome", outcome }
+        };
+        AgentTelemetryService.LlmDuration.Record(duration.TotalSeconds, tags);
+        Activity.Current?.SetTag("agent.llm.outcome", outcome);
         _logger.LogInformation(
             "LLM round {LlmRound} finished with {LlmOutcome} in {LlmDurationMs} ms",
             round,
@@ -101,8 +123,22 @@ public sealed class AgentRequestTelemetry : IDisposable
         return activity;
     }
 
-    public void RecordToolCall(string toolName, TimeSpan duration)
+    public void RecordToolCall(
+        string toolName,
+        TimeSpan duration,
+        bool succeeded = true)
     {
+        var tags = new TagList
+        {
+            { "agent.tool.name", toolName },
+            { "agent.tool.outcome", succeeded ? "completed" : "failed" }
+        };
+        AgentTelemetryService.ToolDuration.Record(duration.TotalSeconds, tags);
+        if (!succeeded)
+            AgentTelemetryService.ToolErrors.Add(
+                1, new TagList { { "agent.tool.name", toolName } });
+        Activity.Current?.SetTag(
+            "agent.tool.outcome", succeeded ? "completed" : "failed");
         _logger.LogInformation(
             "Tool {ToolName} finished in {ToolDurationMs} ms",
             toolName,
@@ -163,6 +199,22 @@ public sealed class AgentRequestTelemetry : IDisposable
 
         _finished = true;
         var duration = Stopwatch.GetElapsedTime(_startedAt);
+        var metricTags = new TagList
+        {
+            { "agent.status", status },
+            { "gen_ai.provider.name", _llm.Provider },
+            { "gen_ai.request.model", _llm.Model },
+            { "agent.evidence.verified", evidenceVerified?.ToString().ToLowerInvariant() ?? "unknown" }
+        };
+        AgentTelemetryService.RequestDuration.Record(duration.TotalSeconds, metricTags);
+        if (evidenceVerified == false)
+        {
+            AgentTelemetryService.EvidenceFailures.Add(1, new TagList
+            {
+                { "gen_ai.provider.name", _llm.Provider },
+                { "gen_ai.request.model", _llm.Model }
+            });
+        }
 
         _activity?.SetTag("agent.status", status);
         _activity?.SetTag("agent.duration.ms", duration.TotalMilliseconds);

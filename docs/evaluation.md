@@ -5,7 +5,7 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The ordinary offline suite contains 116 xUnit tests. They do not call Ollama,
+The ordinary offline suite contains 117 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 Two additional real-PostgreSQL tests cover repository parity and pgvector
 search; they are skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
@@ -75,6 +75,19 @@ method. It verifies:
 - Completed requests emit request, duration, round, tool, and evidence tags.
 - Failed and timed-out operations use the expected status and activity error
   state.
+- Metric tests verify request, LLM, tool-error, and evidence-failure
+  instruments and ensure request identifiers are not metric labels.
+
+### Local observability verification
+
+The optional Compose stack was verified with the pinned collector, Tempo,
+Prometheus, and Grafana images. Twelve real `GET /api/media` requests produced
+12 spans in Tempo under `media-intelligence-api`; Prometheus scraped the real
+`http_server_request_duration_seconds` histogram with the same service label.
+Grafana provisioned healthy Prometheus and Tempo data sources and the Media
+Intelligence Agent Observability dashboard. This local ingestion check made no
+LLM or paid-cloud request. Custom agent panels populate when agent requests are
+made; their instruments are also covered by deterministic offline tests.
 
 ### LLM provider configuration
 

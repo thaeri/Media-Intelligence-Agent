@@ -25,7 +25,7 @@ customer data, real device identifiers, or probabilistic identity matching.
 - Campaign-aware reach and frequency over explicit synthetic ad impressions
   with optional UTC windows.
 - Structured request, LLM-round, and tool-call telemetry using `ILogger` and
-  `System.Diagnostics.ActivitySource`.
+  OpenTelemetry traces and privacy-safe metrics.
 - Hybrid media discovery using pgvector cosine similarity plus deterministic
   title/tag retrieval, explicit indexing, and safe lexical fallback.
 - Offline evaluation and regression tests that never call Ollama or OpenAI.
@@ -63,11 +63,48 @@ Campaign definitions are documented in
 - xUnit and Microsoft Test SDK
 - `ILogger` structured logging
 - `System.Diagnostics.ActivitySource`
+- Optional OpenTelemetry Collector, Prometheus, Tempo, and Grafana stack
 - GitHub Actions using the .NET 10 SDK
 
 No database or external telemetry backend is required. Storage defaults to the
 existing in-memory synthetic repository, and the default Ollama configuration
 requires no cloud account or paid request.
+
+## Optional local observability
+
+The default Compose stack remains PostgreSQL, migration/seed, and API only.
+Grafana, Tempo, Prometheus, and the OpenTelemetry Collector are enabled by an
+explicit profile and override file; no Jaeger, Loki, alerting, or model service
+is included.
+
+```powershell
+$env:POSTGRES_PASSWORD = "<local-development-password>"
+docker compose -f compose.yaml -f compose.observability.yaml `
+  --profile observability up --build -d
+```
+
+Open the provisioned dashboard at
+`http://localhost:3000/d/media-intelligence-observability/media-intelligence-agent-observability`.
+It shows API
+request rate and p50/p95/p99 latency, agent latency, LLM latency by provider,
+tool duration and errors, and evidence-verification failures. Prometheus
+exemplars link eligible metric samples to Tempo traces, and Tempo can derive
+matching Prometheus queries from trace resource attributes.
+
+Stop the optional stack with:
+
+```powershell
+docker compose -f compose.yaml -f compose.observability.yaml `
+  --profile observability down
+```
+
+Only Grafana and the existing API bind to host loopback; collector,
+Prometheus, Tempo, and PostgreSQL remain private to the Compose network.
+Telemetry records bounded provider/model, tool, outcome, route, duration, and
+status attributes. It does not record prompts, model responses, tool payloads,
+credentials, raw device IDs, or audience IDs. Anonymous Grafana access and the
+example database password are local-development conveniences, not production
+security settings. See [Local observability](docs/observability.md).
 
 ## Windows setup
 

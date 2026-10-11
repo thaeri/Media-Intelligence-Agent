@@ -4,6 +4,10 @@ using MediaIntelligence.Core.Services;
 using Microsoft.EntityFrameworkCore;
 using OpenAI.Chat;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +15,38 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks()
     .AddCheck<StorageHealthCheck>("storage");
+
+if (builder.Configuration.GetValue<bool>("Observability:Enabled"))
+{
+    var otlpEndpoint = builder.Configuration.GetValue<string>(
+        "Observability:OtlpEndpoint") ?? "http://localhost:4317";
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(resource => resource.AddService(
+            serviceName: "media-intelligence-api",
+            serviceVersion: typeof(Program).Assembly.GetName().Version?.ToString()))
+        .WithTracing(tracing => tracing
+            .AddAspNetCoreInstrumentation(options =>
+            {
+                options.Filter = context =>
+                    !context.Request.Path.StartsWithSegments("/health");
+                options.RecordException = true;
+            })
+            .AddSource(AgentTelemetryService.ActivitySourceName)
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }))
+        .WithMetrics(metrics => metrics
+            .SetExemplarFilter(ExemplarFilterType.TraceBased)
+            .AddAspNetCoreInstrumentation()
+            .AddMeter(AgentTelemetryService.MeterName)
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+                options.Protocol = OtlpExportProtocol.Grpc;
+            }));
+}
 
 builder.Services.AddSingleton<IValidateOptions<StorageOptions>,
     StorageOptionsValidator>();

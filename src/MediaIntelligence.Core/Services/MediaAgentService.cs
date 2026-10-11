@@ -379,16 +379,19 @@ Strict response schema:
                 using var toolActivity = telemetry.StartToolCall(
                     call.FunctionName);
                 string result;
+                var toolSucceeded = false;
 
                 try
                 {
                     result = ExecuteTool(call);
+                    toolSucceeded = true;
                 }
                 finally
                 {
                     telemetry.RecordToolCall(
                         call.FunctionName,
-                        Stopwatch.GetElapsedTime(toolStartedAt));
+                        Stopwatch.GetElapsedTime(toolStartedAt),
+                        toolSucceeded);
                 }
 
                 var evidenceReference = $"tool-{toolExecutions.Count + 1}";

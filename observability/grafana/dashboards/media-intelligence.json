@@ -1,0 +1,75 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "API request rate",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(http_server_request_duration_seconds_count{service_name=\"media-intelligence-api\"}[5m]))", "legendFormat": "requests/s", "exemplar": true }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "API latency p50 / p95 / p99",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"media-intelligence-api\"}[5m])))", "legendFormat": "p50", "exemplar": true },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"media-intelligence-api\"}[5m])))", "legendFormat": "p95", "exemplar": true },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=\"media-intelligence-api\"}[5m])))", "legendFormat": "p99", "exemplar": true }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 }
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Agent latency p50 / p95 / p99",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(media_agent_request_duration_seconds_bucket[5m])))", "legendFormat": "p50", "exemplar": true },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(media_agent_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "exemplar": true },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(media_agent_request_duration_seconds_bucket[5m])))", "legendFormat": "p99", "exemplar": true }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "LLM latency p95 by provider",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, gen_ai_provider_name) (rate(media_agent_llm_duration_seconds_bucket[5m])))", "legendFormat": "{{gen_ai_provider_name}}", "exemplar": true }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Tool duration p95",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, agent_tool_name) (rate(media_agent_tool_duration_seconds_bucket[5m])))", "legendFormat": "{{agent_tool_name}}", "exemplar": true }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Tool errors",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (agent_tool_name) (increase(media_agent_tool_errors_total[5m]))", "legendFormat": "{{agent_tool_name}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 }
+    },
+    {
+      "id": 7, "type": "stat", "title": "Evidence verification failures (5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(increase(media_agent_evidence_verification_failures_total[5m]))" }],
+      "fieldConfig": { "defaults": { "unit": "short", "noValue": "0" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": ["media-intelligence", "opentelemetry"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "title": "Media Intelligence Agent Observability",
+  "uid": "media-intelligence-observability",
+  "version": 1
+}

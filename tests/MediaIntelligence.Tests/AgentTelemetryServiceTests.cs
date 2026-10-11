@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using MediaIntelligence.Core.Services;
 using Microsoft.Extensions.Logging;
 
@@ -88,6 +89,53 @@ public sealed class AgentTelemetryServiceTests
         Assert.Equal(
             "InvalidOperationException",
             activity.GetTagItem("error.type"));
+    }
+
+    [Fact]
+    public void Metrics_RecordDurationsErrorsAndEvidenceWithoutSensitiveContent()
+    {
+        var measurements = new List<(string Name, double Value, string Tags)>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == AgentTelemetryService.MeterName)
+                    meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+            measurements.Add((instrument.Name, value, FormatTags(tags))));
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Add((instrument.Name, value, FormatTags(tags))));
+        listener.Start();
+
+        var service = new AgentTelemetryService(
+            new CapturingLogger<AgentTelemetryService>(),
+            new LlmClientMetadata("Foundry", "gpt-5", TimeSpan.FromMinutes(2)));
+        using (var request = service.BeginRequest("private-request-id"))
+        {
+            request.RecordLlmRound(1, TimeSpan.FromMilliseconds(25), "finished");
+            request.RecordToolCall(
+                "get_campaign_performance", TimeSpan.FromMilliseconds(3),
+                succeeded: false);
+            request.Complete(evidenceVerified: false);
+        }
+
+        Assert.Contains(measurements, item =>
+            item.Name == "media.agent.request.duration");
+        Assert.Contains(measurements, item =>
+            item.Name == "media.agent.llm.duration" &&
+            item.Tags.Contains("Foundry", StringComparison.Ordinal));
+        Assert.Contains(measurements, item =>
+            item.Name == "media.agent.tool.errors" && item.Value == 1);
+        Assert.Contains(measurements, item =>
+            item.Name == "media.agent.evidence.verification.failures" &&
+            item.Value == 1);
+        Assert.DoesNotContain(measurements, item =>
+            item.Tags.Contains("private-request-id", StringComparison.Ordinal));
+
+        static string FormatTags(ReadOnlySpan<KeyValuePair<string, object?>> tags) =>
+            string.Join(';', tags.ToArray().Select(tag => $"{tag.Key}={tag.Value}"));
     }
 
     private static ActivityListener CreateListener(

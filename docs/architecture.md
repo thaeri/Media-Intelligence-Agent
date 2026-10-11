@@ -24,6 +24,10 @@ flowchart LR
     Campaign[CampaignAnalytics]
     Evidence[EvidenceReviewerService]
     Telemetry[AgentTelemetryService]
+    Collector[OpenTelemetry Collector]
+    Prometheus[Prometheus]
+    Tempo[Tempo]
+    Grafana[Grafana]
 
     Client --> API
     API --> Agent
@@ -44,6 +48,11 @@ flowchart LR
     Campaign --> Repo
     Agent --> Evidence
     Agent --> Telemetry
+    API -. opt-in OTLP .-> Collector
+    Collector --> Prometheus
+    Collector --> Tempo
+    Prometheus --> Grafana
+    Tempo --> Grafana
 ```
 
 `MediaIntelligence.Api` is the composition root. `MediaIntelligence.Core`
@@ -105,6 +114,23 @@ default stack performs no embedding work; the `search` profile exposes the
 explicit Development-only indexing command after migration/seed.
 No Ollama service or model download is part of the Compose project. Ollama,
 OpenAI, and Foundry remain separately configured optional LLM providers.
+
+## Optional observability pipeline
+
+OpenTelemetry export is disabled by default. The observability Compose override
+enables ASP.NET Core instrumentation plus the existing agent `ActivitySource`
+and meter, then sends OTLP/gRPC to one collector. The collector exports traces
+to Tempo and exposes application metrics for Prometheus to scrape. Grafana is
+provisioned with both data sources and one dashboard. Prometheus exemplar
+links target Tempo; Tempo trace-to-metrics queries map `service.name` to the
+Prometheus `service_name` label.
+
+The pipeline exports no logs. Span and metric attributes are deliberately
+bounded and exclude request bodies, prompts, model responses, analytics tool
+payloads, credentials, and pseudonymous identity values. The collector,
+Prometheus, Tempo, and PostgreSQL have no host-published ports; only the API and
+Grafana bind to loopback. See [observability.md](observability.md) for startup,
+versions, and verification commands.
 
 ## Hybrid semantic discovery
 
