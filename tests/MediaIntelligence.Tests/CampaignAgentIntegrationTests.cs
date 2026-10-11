@@ -174,6 +174,27 @@ public sealed class CampaignAgentIntegrationTests
         Assert.Equal(draft, finalized.Response);
     }
 
+    [Fact]
+    public void ComparisonToolPayload_VerifiesClaimLocalCampaignDeltas()
+    {
+        var repository = new SyntheticMediaRepository();
+        var agent = CreateAgent(repository);
+        var evidence = agent.CompareCampaignPerformance();
+        const string draft =
+            "Compared with City Stories Launch, Desert Heroes Encore has " +
+            "1 more eligible impression, equal reach with a difference of 0, " +
+            "0.5 higher average frequency, and 10 percentage points higher " +
+            "eligible coverage.";
+
+        var finalized = agent.FinalizeResponse(draft, [evidence]);
+
+        Assert.True(
+            finalized.Review.IsVerified,
+            string.Join(", ", finalized.Review.UnsupportedClaims));
+        Assert.Equal(draft, finalized.Response);
+        AssertNoIdentityLeakage(repository, finalized.Response);
+    }
+
     private static MediaAgentService CreateAgent(
         SyntheticMediaRepository repository)
     {

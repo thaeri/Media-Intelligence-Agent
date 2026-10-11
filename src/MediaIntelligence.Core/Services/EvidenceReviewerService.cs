@@ -11,6 +11,14 @@ public sealed record EvidenceReviewResult(
 
 public sealed partial class EvidenceReviewerService
 {
+    private readonly IEvidenceReviewDiagnostics _diagnostics;
+
+    public EvidenceReviewerService(
+        IEvidenceReviewDiagnostics? diagnostics = null)
+    {
+        _diagnostics = diagnostics ?? NullEvidenceReviewDiagnostics.Instance;
+    }
+
     public EvidenceReviewResult Review(
         string response,
         IEnumerable<string> analyticsToolResults)
@@ -35,12 +43,20 @@ public sealed partial class EvidenceReviewerService
             .Cast<string>()
             .ToArray();
 
-        var unsupportedNumericClaims = NumericClaimRegex()
+        var numericClaims = NumericClaimRegex()
             .Matches(response)
-            .Where(match => !IsWithinIsoDate(response, match.Index))
+            .Where(match => !IsWithinIsoDate(
+                response,
+                match.Groups["value"].Index))
             .Where(match => !IsListOrdinal(response, match))
             .Select(match => CreateNumericClaim(response, match, titles))
-            .Where(claim => !evidence.Any(value => Matches(claim, value)))
+            .Select(claim => new ReviewedNumericClaim(
+                claim,
+                IsClaimSupported(claim, evidence)))
+            .ToArray();
+        var unsupportedNumericClaims = numericClaims
+            .Where(claim => !claim.IsSupported)
+            .Select(claim => claim.Claim)
             .Select(claim => claim.Text)
             .ToArray();
 
@@ -51,9 +67,24 @@ public sealed partial class EvidenceReviewerService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        return new EvidenceReviewResult(
+        var result = new EvidenceReviewResult(
             unsupportedClaims.Length == 0,
             unsupportedClaims);
+        if (!result.IsVerified)
+        {
+            _diagnostics.WriteRejectedDraft(
+                response,
+                unsupportedClaims,
+                numericClaims.Select(claim => new EvidenceClaimDiagnostic(
+                    claim.Claim.Text,
+                    claim.Claim.Title,
+                    claim.Claim.Metric,
+                    claim.Claim.ComparedWithTitle,
+                    claim.Claim.Direction,
+                    claim.IsSupported)).ToArray());
+        }
+
+        return result;
     }
 
     public string CreateVerifiedResponse(
@@ -289,6 +320,20 @@ public sealed partial class EvidenceReviewerService
 
     private static bool Matches(NumericClaim claim, EvidenceValue evidence)
     {
+        if (claim.Metric is null)
+        {
+            return false;
+        }
+
+        if (evidence.ComparedWithTitle is not null &&
+            (claim.Title is null ||
+             claim.Metric is null ||
+             claim.ComparedWithTitle is null ||
+             claim.Direction is null))
+        {
+            return false;
+        }
+
         if (claim.Title is not null &&
             !string.Equals(
                 claim.Title,
@@ -332,27 +377,75 @@ public sealed partial class EvidenceReviewerService
         return Math.Abs(claim.Value - evidence.Value) <= tolerance;
     }
 
+    private static bool IsClaimSupported(
+        NumericClaim claim,
+        IReadOnlyList<EvidenceValue> evidence)
+    {
+        if (claim.Metric is not null)
+        {
+            return evidence.Any(value => Matches(claim, value));
+        }
+
+        if (claim.Title is null || claim.ComparedWithTitle is not null)
+        {
+            return false;
+        }
+
+        var matchingMetrics = evidence
+            .Where(value => value.ComparedWithTitle is null)
+            .Where(value => string.Equals(
+                value.Title,
+                claim.Title,
+                StringComparison.OrdinalIgnoreCase))
+            .Where(value => NumericValuesMatch(claim, value))
+            .Select(value => value.Metric)
+            .Where(metric => metric is not null)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return matchingMetrics.Length == 1;
+    }
+
+    private static bool NumericValuesMatch(
+        NumericClaim claim,
+        EvidenceValue evidence)
+    {
+        var tolerance = claim.DecimalPlaces == 0
+            ? 0.5
+            : 0.5 * Math.Pow(10, -claim.DecimalPlaces);
+        return Math.Abs(claim.Value - evidence.Value) <= tolerance;
+    }
+
     private static NumericClaim CreateNumericClaim(
         string response,
         Match match,
         IReadOnlyList<string> titles)
     {
         var attribution = FindCampaignAttribution(response, match.Index, titles);
-        var direction = IsDifferenceClaim(response, match)
-            ? FindComparisonDirection(response, match.Index)
-            : null;
-        var metric = FindMarkdownTableMetric(response, match.Index) ?? FindAttributedMetric(response, match.Index);
-        var comparedWithTitle = direction is null ? null : attribution.ComparedWithTitle;
+        var direction = attribution.ComparedWithTitle is null
+            ? null
+            : FindDifferenceDirection(response, match);
+        var metric = FindMarkdownTableMetric(response, match.Index) ??
+            FindAttributedMetric(response, match.Index);
+        var comparedWithTitle = direction is null
+            ? null
+            : attribution.ComparedWithTitle;
         if (comparedWithTitle is not null)
         {
             metric = FindDifferenceMetric(response, match) ?? ToDifferenceMetric(metric);
         }
 
+        var value = double.Parse(
+            match.Groups["value"].Value,
+            CultureInfo.InvariantCulture);
+        if (comparedWithTitle is null &&
+            match.Groups["sign"].Value is "-" or "−")
+        {
+            value = -value;
+        }
+
         return new NumericClaim(
             match.Value.Trim(),
-            double.Parse(
-                match.Groups["value"].Value,
-                CultureInfo.InvariantCulture),
+            value,
             CountDecimalPlaces(match.Groups["value"].Value),
             attribution.Title,
             metric,
@@ -541,15 +634,26 @@ public sealed partial class EvidenceReviewerService
             lineEnd = response.Length;
         }
 
-        var occurrences = titles
-            .SelectMany(title => FindOccurrences(response, title, lineStart, lineEnd)
-                .Select(index => new TitleOccurrence(title, index)))
-            .OrderBy(item => item.Index)
-            .ToArray();
+        var occurrences = FindTitleOccurrences(
+            response,
+            titles,
+            lineStart,
+            lineEnd);
 
         if (occurrences.Length == 0)
         {
-            return new CampaignAttribution(FindAttributedTitle(response, claimIndex, titles.ToArray()), null);
+            var heading = FindComparisonHeading(
+                response,
+                titles,
+                lineStart);
+            if (heading is not null)
+            {
+                return heading;
+            }
+
+            return new CampaignAttribution(
+                FindAttributedTitle(response, claimIndex, titles.ToArray()),
+                null);
         }
 
         var beforeClaim = occurrences.Where(item => item.Index <= claimIndex).ToArray();
@@ -557,11 +661,28 @@ public sealed partial class EvidenceReviewerService
         TitleOccurrence? comparedWith = null;
         var line = response[lineStart..lineEnd];
 
-        if (beforeClaim.Length >= 2 && LooksLikeLeadingComparison(line))
+        if (occurrences.Length >= 2 &&
+            Regex.IsMatch(
+                line[..Math.Max(0, occurrences[0].Index - lineStart)],
+                @"\bcompared\s+(?:with|to)\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
         {
-            subject = beforeClaim[0];
-            comparedWith = beforeClaim.FirstOrDefault(item =>
-                !string.Equals(item.Title, subject.Title, StringComparison.OrdinalIgnoreCase));
+            comparedWith = occurrences[0];
+            subject = occurrences[1];
+        }
+        else if (occurrences.Length >= 2 &&
+                 occurrences[1].Index + occurrences[1].Title.Length <= claimIndex &&
+                 Regex.IsMatch(
+                     response[(occurrences[0].Index + occurrences[0].Title.Length)..occurrences[1].Index],
+                     @"\b(?:leads?|exceeds?|trails?|is\s+(?:ahead|behind)|vs\.?|versus|compared\s+(?:with|to))\b",
+                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) &&
+                 Regex.IsMatch(
+                     response[(occurrences[1].Index + occurrences[1].Title.Length)..claimIndex],
+                     @"\bby\s*$",
+                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            subject = occurrences[0];
+            comparedWith = occurrences[1];
         }
         else
         {
@@ -573,6 +694,66 @@ public sealed partial class EvidenceReviewerService
         }
 
         return new CampaignAttribution(subject.Title, comparedWith?.Title);
+    }
+
+    private static TitleOccurrence[] FindTitleOccurrences(
+        string response,
+        IReadOnlyCollection<string> titles,
+        int start,
+        int end) =>
+        titles
+            .SelectMany(title => FindOccurrences(response, title, start, end)
+                .Select(index => new TitleOccurrence(title, index)))
+            .OrderBy(item => item.Index)
+            .ToArray();
+
+    private static CampaignAttribution? FindComparisonHeading(
+        string response,
+        IReadOnlyCollection<string> titles,
+        int currentLineStart)
+    {
+        var searchEnd = Math.Max(0, currentLineStart - 1);
+        for (var lines = 0; lines < 10 && searchEnd > 0; lines++)
+        {
+            var lineStart = response.LastIndexOf('\n', Math.Max(0, searchEnd - 1)) + 1;
+            var line = response[lineStart..searchEnd];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return null;
+            }
+
+            var occurrences = FindTitleOccurrences(
+                response,
+                titles,
+                lineStart,
+                searchEnd);
+            if (occurrences.Length >= 2)
+            {
+                if (Regex.IsMatch(
+                    line,
+                    @"\b(?:vs\.?|versus|compared\s+(?:with|to))\b",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                {
+                    if (Regex.IsMatch(
+                        line[..Math.Max(0, occurrences[0].Index - lineStart)],
+                        @"\bcompared\s+(?:with|to)\s*$",
+                        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                    {
+                        return new CampaignAttribution(
+                            occurrences[1].Title,
+                            occurrences[0].Title);
+                    }
+
+                    return new CampaignAttribution(
+                        occurrences[0].Title,
+                        occurrences[1].Title);
+                }
+            }
+
+            searchEnd = Math.Max(0, lineStart - 1);
+        }
+
+        return null;
     }
 
     private static IEnumerable<int> FindOccurrences(string text, string value, int start, int end)
@@ -591,56 +772,67 @@ public sealed partial class EvidenceReviewerService
         }
     }
 
-    private static bool LooksLikeLeadingComparison(string line) =>
-        Regex.IsMatch(
-            line,
-            @"\b(?:leads?|exceeds?|trails?|is ahead of|is behind|compared (?:with|to)|versus|vs\.?)\b.*\bby\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
-    private static string? FindComparisonDirection(string response, int claimIndex)
+    private static string? FindDifferenceDirection(string response, Match match)
     {
-        var lineStart = response.LastIndexOf('\n', Math.Max(0, claimIndex - 1)) + 1;
-        var lineEnd = response.IndexOf('\n', claimIndex);
-        if (lineEnd < 0)
-        {
-            lineEnd = response.Length;
-        }
-
-        var line = response[lineStart..lineEnd];
-        if (Regex.IsMatch(line, @"\b(?:no difference|equal|equals|same|tied)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
-        {
-            return CampaignComparisonCalculator.Equal;
-        }
-
-        if (Regex.IsMatch(line, @"\b(?:more|higher|greater|ahead|leads?|exceeds?|above)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        var sign = match.Groups["sign"].Value;
+        if (sign == "+")
         {
             return CampaignComparisonCalculator.Higher;
         }
 
-        if (Regex.IsMatch(line, @"\b(?:fewer|lower|less|behind|trails?|below)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        if (sign is "-" or "−")
         {
             return CampaignComparisonCalculator.Lower;
         }
 
-        return null;
-    }
+        var clauseStart = FindClauseStart(response, match.Index);
+        var clauseEnd = FindClauseEnd(response, match.Index);
+        var before = response[clauseStart..match.Index];
+        var after = response[(match.Index + match.Length)..clauseEnd];
 
-    private static bool IsDifferenceClaim(string response, Match match)
-    {
-        var lineStart = response.LastIndexOf('\n', Math.Max(0, match.Index - 1)) + 1;
-        var lineEnd = response.IndexOf('\n', match.Index);
-        if (lineEnd < 0)
+        if (Regex.IsMatch(
+            after,
+            @"^\s*(?:%|percent(?:age)?(?:\s+points?)?|pp|eligible\s+impressions?|impressions?|audiences?|viewers?|frequency)?\s*(?:more|higher|greater|ahead|above)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+            Regex.IsMatch(
+                before,
+                @"\b(?:higher|greater|ahead|leads?|exceeds?|above)(?:\s+\w+){0,3}\s+by\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
         {
-            lineEnd = response.Length;
+            return CampaignComparisonCalculator.Higher;
         }
 
-        var before = response[lineStart..match.Index];
-        var after = response[(match.Index + match.Length)..lineEnd];
-        return Regex.IsMatch(before, @"\bby\s*$|\bdifference\D*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
-               Regex.IsMatch(
-                   after,
-                   @"^\s*(?:%|percent(?:age)?(?:\s+points?)?|pp|eligible\s+impressions?|impressions?|audiences?|viewers?|frequency)?\s*(?:more|fewer|higher|lower|greater|less|ahead|behind|above|below)\b",
-                   RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (Regex.IsMatch(
+            after,
+            @"^\s*(?:%|percent(?:age)?(?:\s+points?)?|pp|eligible\s+impressions?|impressions?|audiences?|viewers?|frequency)?\s*(?:fewer|lower|less|behind|below)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+            Regex.IsMatch(
+                before,
+                @"\b(?:lower|less|behind|trails?|below)(?:\s+\w+){0,3}\s+by\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+        {
+            return CampaignComparisonCalculator.Lower;
+        }
+
+        var explicitlyDifference = Regex.IsMatch(
+            before,
+            @"\bdifference(?:\s+(?:of|is|was))?\s*[:=]?\s*$|\bby\s*$",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+            Regex.IsMatch(
+                after,
+                @"^\s*(?:%|percent(?:age)?(?:\s+points?)?|pp)?\s+difference\b",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        if (explicitlyDifference &&
+            double.TryParse(
+                match.Groups["value"].Value,
+                CultureInfo.InvariantCulture,
+                out var value) &&
+            Math.Abs(value) < double.Epsilon)
+        {
+            return CampaignComparisonCalculator.Equal;
+        }
+
+        return null;
     }
 
     private static string? ToDifferenceMetric(string? metric) => metric switch
@@ -688,6 +880,28 @@ public sealed partial class EvidenceReviewerService
             return "coverage_difference";
         }
 
+        var lineStart = response.LastIndexOf('\n', Math.Max(0, match.Index - 1)) + 1;
+        var before = response[lineStart..match.Index];
+        var candidates = MetricPhrases
+            .Where(item => item.Metric is
+                "eligible_impressions" or "reach" or "frequency" or "coverage" or
+                "eligible_impressions_difference" or "reach_difference" or
+                "frequency_difference" or "coverage_difference")
+            .Select(item => new
+            {
+                item.Metric,
+                Index = before.LastIndexOf(
+                    item.Phrase,
+                    StringComparison.OrdinalIgnoreCase)
+            })
+            .Where(item => item.Index >= 0)
+            .OrderByDescending(item => item.Index)
+            .FirstOrDefault();
+        if (candidates is not null)
+        {
+            return ToDifferenceMetric(candidates.Metric);
+        }
+
         return null;
     }
 
@@ -707,15 +921,35 @@ public sealed partial class EvidenceReviewerService
         }
 
         var column = response[rowStart..claimIndex].Count(character => character == '|') - 1;
-        var separatorEnd = rowStart - 1;
-        var separatorStart = response.LastIndexOf('\n', Math.Max(0, separatorEnd - 1)) + 1;
-        if (separatorStart <= 0)
+        var separatorStart = -1;
+        var separatorEnd = -1;
+        var searchEnd = rowStart - 1;
+        for (var lines = 0; lines < 20 && searchEnd > 0; lines++)
         {
-            return null;
+            var candidateStart = response.LastIndexOf(
+                '\n',
+                Math.Max(0, searchEnd - 1)) + 1;
+            var candidate = response[candidateStart..searchEnd];
+            if (Regex.IsMatch(
+                candidate,
+                @"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$",
+                RegexOptions.CultureInvariant))
+            {
+                separatorStart = candidateStart;
+                separatorEnd = searchEnd;
+                break;
+            }
+
+            if (string.IsNullOrWhiteSpace(candidate) ||
+                !candidate.TrimStart().StartsWith('|'))
+            {
+                return null;
+            }
+
+            searchEnd = Math.Max(0, candidateStart - 1);
         }
 
-        var separator = response[separatorStart..separatorEnd];
-        if (!Regex.IsMatch(separator, @"^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$", RegexOptions.CultureInvariant))
+        if (separatorStart < 0 || separatorEnd < 0)
         {
             return null;
         }
@@ -769,6 +1003,10 @@ public sealed partial class EvidenceReviewerService
 
     private sealed record CampaignAttribution(string? Title, string? ComparedWithTitle);
 
+    private sealed record ReviewedNumericClaim(
+        NumericClaim Claim,
+        bool IsSupported);
+
     private sealed record NumericClaim(
         string Text,
         double Value,
@@ -776,13 +1014,7 @@ public sealed partial class EvidenceReviewerService
         string? Title,
         string? Metric,
         string? ComparedWithTitle,
-        string? Direction = null)
-    {
-        public bool IsPercentage =>
-            Text.Contains('%', StringComparison.Ordinal) ||
-            Text.Contains("percent", StringComparison.OrdinalIgnoreCase) ||
-            Text.Contains("percentage point", StringComparison.OrdinalIgnoreCase);
-    }
+        string? Direction = null);
 
     private sealed record EvidenceValue(
         double Value,
@@ -821,7 +1053,7 @@ public sealed partial class EvidenceReviewerService
     ];
 
     [GeneratedRegex(
-        @"(?<![\p{L}\p{N}_])(?<value>\d+(?:\.\d+)?)(?:\s*(?:%|percent(?:age)?(?:\s+points?)?|viewing\s+sessions?|sessions?))?",
+        @"(?<![\p{L}\p{N}_])(?<sign>[+\-−])?\s*(?<value>\d+(?:\.\d+)?)(?:\s*(?:%|percent(?:age)?(?:\s+points?)?|viewing\s+sessions?|sessions?))?",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex NumericClaimRegex();
 

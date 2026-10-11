@@ -125,6 +125,29 @@ then exposed an insufficient 300-token completion ceiling for the cloud model;
 raising the existing ceiling to 1,000 allowed the grounded final response to
 complete. Both conditions failed visibly without provider fallback.
 
+## Local rejected-draft diagnostics
+
+Rejected model drafts are not written by default. For a short local debugging
+session, a developer may opt in only while the API runs in the `Development`
+environment:
+
+```powershell
+$env:EvidenceReviewDiagnostics__Enabled = "true"
+$env:EvidenceReviewDiagnostics__RetentionMinutes = "60"
+```
+
+The default location is the current user's local application-data directory,
+outside the repository. A custom Windows directory must remain beneath that
+protected directory; other platforms create the directory with user-only
+permissions. Files contain a redacted draft, rejected claim text, and parsed
+campaign/metric/direction provenance. Device IDs, audience IDs, GUIDs, and
+credential-shaped values are redacted. Retention cannot exceed 24 hours and
+expired files are removed on the next rejected-draft capture.
+
+This feature refuses to start when enabled outside `Development`, in CI, or
+with a repository-local path. It never writes through `ILogger`, telemetry,
+normal API responses, or tracked repository files.
+
 ## Known gaps
 
 - No automated end-to-end test hosts the ASP.NET application with a fake
