@@ -423,7 +423,10 @@ public sealed partial class EvidenceReviewerService
         var attribution = FindCampaignAttribution(response, match.Index, titles);
         var direction = attribution.ComparedWithTitle is null
             ? null
-            : FindDifferenceDirection(response, match);
+            : FindDifferenceDirection(
+                response,
+                match,
+                attribution.IsExplicitComparison);
         var metric = FindMarkdownTableMetric(response, match.Index) ??
             FindAttributedMetric(response, match.Index);
         var comparedWithTitle = direction is null
@@ -510,6 +513,30 @@ public sealed partial class EvidenceReviewerService
         var clauseEnd = FindClauseEnd(response, claimIndex);
         var clause = response[clauseStart..clauseEnd];
         var relativeClaimIndex = claimIndex - clauseStart;
+        var precedingText = clause[..relativeClaimIndex];
+        var labelSeparator = precedingText.LastIndexOf(':');
+        if (labelSeparator >= 0)
+        {
+            var label = precedingText[..labelSeparator];
+            var definitionStart = label.IndexOf('(');
+            if (definitionStart >= 0)
+            {
+                label = label[..definitionStart];
+            }
+
+            var labeledMetric = MetricPhrases
+                .Where(item => label.Contains(
+                    item.Phrase,
+                    StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.Phrase.Length)
+                .Select(item => item.Metric)
+                .FirstOrDefault();
+            if (labeledMetric is not null)
+            {
+                return labeledMetric;
+            }
+        }
+
         string? precedingMetric = null;
         var precedingDistance = int.MaxValue;
         string? followingMetric = null;
@@ -653,12 +680,14 @@ public sealed partial class EvidenceReviewerService
 
             return new CampaignAttribution(
                 FindAttributedTitle(response, claimIndex, titles.ToArray()),
-                null);
+                null,
+                false);
         }
 
         var beforeClaim = occurrences.Where(item => item.Index <= claimIndex).ToArray();
         TitleOccurrence subject;
         TitleOccurrence? comparedWith = null;
+        var isExplicitComparison = false;
         var line = response[lineStart..lineEnd];
 
         if (occurrences.Length >= 2 &&
@@ -669,6 +698,7 @@ public sealed partial class EvidenceReviewerService
         {
             comparedWith = occurrences[0];
             subject = occurrences[1];
+            isExplicitComparison = true;
         }
         else if (occurrences.Length >= 2 &&
                  occurrences[1].Index + occurrences[1].Title.Length <= claimIndex &&
@@ -683,6 +713,7 @@ public sealed partial class EvidenceReviewerService
         {
             subject = occurrences[0];
             comparedWith = occurrences[1];
+            isExplicitComparison = true;
         }
         else
         {
@@ -693,7 +724,10 @@ public sealed partial class EvidenceReviewerService
                 .FirstOrDefault();
         }
 
-        return new CampaignAttribution(subject.Title, comparedWith?.Title);
+        return new CampaignAttribution(
+            subject.Title,
+            comparedWith?.Title,
+            isExplicitComparison);
     }
 
     private static TitleOccurrence[] FindTitleOccurrences(
@@ -731,7 +765,7 @@ public sealed partial class EvidenceReviewerService
             {
                 if (Regex.IsMatch(
                     line,
-                    @"\b(?:vs\.?|versus|compared\s+(?:with|to))\b",
+                    @"\b(?:vs\.?|versus|minus|compared\s+(?:with|to))\b",
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
                 {
                     if (Regex.IsMatch(
@@ -741,12 +775,14 @@ public sealed partial class EvidenceReviewerService
                     {
                         return new CampaignAttribution(
                             occurrences[1].Title,
-                            occurrences[0].Title);
+                            occurrences[0].Title,
+                            true);
                     }
 
                     return new CampaignAttribution(
                         occurrences[0].Title,
-                        occurrences[1].Title);
+                        occurrences[1].Title,
+                        true);
                 }
             }
 
@@ -772,7 +808,10 @@ public sealed partial class EvidenceReviewerService
         }
     }
 
-    private static string? FindDifferenceDirection(string response, Match match)
+    private static string? FindDifferenceDirection(
+        string response,
+        Match match,
+        bool isExplicitComparison)
     {
         var sign = match.Groups["sign"].Value;
         if (sign == "+")
@@ -822,7 +861,7 @@ public sealed partial class EvidenceReviewerService
                 after,
                 @"^\s*(?:%|percent(?:age)?(?:\s+points?)?|pp)?\s+difference\b",
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        if (explicitlyDifference &&
+        if ((explicitlyDifference || isExplicitComparison) &&
             double.TryParse(
                 match.Groups["value"].Value,
                 CultureInfo.InvariantCulture,
@@ -1001,7 +1040,10 @@ public sealed partial class EvidenceReviewerService
 
     private sealed record TitleOccurrence(string Title, int Index);
 
-    private sealed record CampaignAttribution(string? Title, string? ComparedWithTitle);
+    private sealed record CampaignAttribution(
+        string? Title,
+        string? ComparedWithTitle,
+        bool IsExplicitComparison);
 
     private sealed record ReviewedNumericClaim(
         NumericClaim Claim,

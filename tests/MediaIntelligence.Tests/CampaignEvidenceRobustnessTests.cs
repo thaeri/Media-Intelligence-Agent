@@ -76,6 +76,65 @@ public sealed class CampaignEvidenceRobustnessTests
         Assert.True(result.IsVerified, string.Join(", ", result.UnsupportedClaims));
     }
 
+    [Fact]
+    public void Review_AcceptsLiveMinusHeadingDraftFromTwoIndividualTools()
+    {
+        const string response = """
+            Note: Results are from a synthetic, consent-aware OTT campaign dataset. UTC windows use inclusive start and exclusive end.
+
+            Observations
+            - City Stories Launch (2026-01-01 to 2026-02-01)
+              - Total impressions: 10
+              - Eligible impressions: 5
+              - Unique audience reach: 2
+              - Average frequency: 2.5
+              - Eligible exposure coverage rate: 50%
+
+            - Desert Heroes Encore (2026-02-01 to 2026-03-01)
+              - Total impressions: 10
+              - Eligible impressions: 6
+              - Unique audience reach: 2
+              - Average frequency: 3.0
+              - Eligible exposure coverage rate: 60%
+
+            Differences (Desert Heroes Encore minus City Stories Launch)
+            - Eligible impressions: +1
+            - Unique audience reach: 0
+            - Average frequency: +0.5
+            - Eligible exposure coverage: +10 percentage points
+
+            If attribution for the differences is needed, additional data would be required.
+            """;
+
+        var result = reviewer.Review(response, [CityEvidence, DesertEvidence]);
+
+        Assert.True(result.IsVerified, string.Join(", ", result.UnsupportedClaims));
+    }
+
+    [Fact]
+    public void Review_PrefersMetricLabelOverParentheticalDefinition()
+    {
+        const string response = """
+            - City Stories Launch
+              - Average frequency (eligible impressions / reach): 2.5
+              - Eligible coverage (eligible impressions / total): 50%
+
+            - Desert Heroes Encore
+              - Average frequency (eligible impressions / reach): 3.0
+              - Eligible coverage (eligible impressions / total): 60%
+
+            Differences (Desert Heroes Encore minus City Stories Launch)
+            - Eligible impressions: +1
+            - Unique audience reach: 0
+            - Average frequency: +0.5
+            - Eligible coverage: +10 percentage points
+            """;
+
+        var result = reviewer.Review(response, [CityEvidence, DesertEvidence]);
+
+        Assert.True(result.IsVerified, string.Join(", ", result.UnsupportedClaims));
+    }
+
     [Theory]
     [InlineData("City Stories Launch has 1 more eligible impression than Desert Heroes Encore.")]
     [InlineData("Desert Heroes Encore has 2 more eligible impressions than City Stories Launch.")]
