@@ -72,6 +72,18 @@ public sealed class StreamingEventTests
     }
 
     [Fact]
+    public void SyntheticFixture_SeedNamespacesIdsAndCurrentTimeIsStable()
+    {
+        var eventTime = new DateTime(2026, 10, 12, 12, 0, 0, DateTimeKind.Utc);
+        var first = SyntheticStreamingProducer.CreateEvents(2, 1, eventTime, 7);
+        var second = SyntheticStreamingProducer.CreateEvents(2, 1, eventTime, 8);
+
+        Assert.NotEqual(first[0].Value, second[0].Value);
+        Assert.All(first, item => Assert.Equal(eventTime,
+            StreamingEventCodec.Decode(item.Topic, item.Value).EventTimeUtc));
+    }
+
+    [Fact]
     public void StreamingOptions_RejectUnsafeRetryAndProducerValues()
     {
         var result = new StreamingOptionsValidator().Validate(null,
@@ -79,12 +91,16 @@ public sealed class StreamingEventTests
             {
                 MaxRetries = 0,
                 ProducerViewingCount = -1,
-                ProducerBurstSize = 0
+                ProducerBurstSize = 0,
+                ProducerConcurrency = 0,
+                ProducerBatchSize = 0
             });
 
         Assert.True(result.Failed);
         Assert.Contains(result.Failures!, item => item.Contains("MaxRetries"));
         Assert.Contains(result.Failures!, item => item.Contains("cannot be negative"));
         Assert.Contains(result.Failures!, item => item.Contains("BurstSize"));
+        Assert.Contains(result.Failures!, item => item.Contains("Concurrency"));
+        Assert.Contains(result.Failures!, item => item.Contains("BatchSize"));
     }
 }

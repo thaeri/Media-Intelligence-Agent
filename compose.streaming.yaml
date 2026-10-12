@@ -32,7 +32,7 @@ services:
     command:
       - |
         for topic in viewing-events.v1 ad-impressions.v1 media-events.dlq.v1; do
-          rpk topic create "$${topic}" -X brokers=redpanda:9092 --partitions 3 --replicas 1 --if-not-exists
+          rpk topic create "$${topic}" -X brokers=redpanda:9092 --partitions ${STREAM_PARTITIONS:-3} --replicas 1 --if-not-exists
         done
     depends_on:
       redpanda:
@@ -83,6 +83,11 @@ services:
       Streaming__ProducerBurstSize: ${STREAM_BURST_SIZE:-100}
       Streaming__ProducerDuplicateEvery: ${STREAM_DUPLICATE_EVERY:-100}
       Streaming__ProducerIncludePoison: ${STREAM_INCLUDE_POISON:-true}
+      Streaming__ProducerConcurrency: ${STREAM_PRODUCER_CONCURRENCY:-1}
+      Streaming__ProducerBatchSize: ${STREAM_PRODUCER_BATCH_SIZE:-1}
+      Streaming__ProducerLingerMilliseconds: ${STREAM_PRODUCER_LINGER_MS:-0}
+      Streaming__ProducerSeed: ${STREAM_PRODUCER_SEED:-0}
+      Streaming__ProducerUseCurrentTime: ${STREAM_USE_CURRENT_TIME:-false}
     command: ["--produce-stream-events"]
     depends_on:
       stream-topics:

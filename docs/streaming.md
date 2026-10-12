@@ -67,6 +67,11 @@ The topic job idempotently creates three partitions and replication factor one f
 | `STREAM_BURST_SIZE` | 100 | Rate-control burst size |
 | `STREAM_DUPLICATE_EVERY` | 100 | Replay every nth unique record; zero disables |
 | `STREAM_INCLUDE_POISON` | true | Append one malformed JSON record |
+| `STREAM_PRODUCER_CONCURRENCY` | 1 | Maximum outstanding `acks=all` deliveries |
+| `STREAM_PRODUCER_BATCH_SIZE` | 1 | librdkafka batch message ceiling |
+| `STREAM_PRODUCER_LINGER_MS` | 0 | Bounded batching delay |
+| `STREAM_PRODUCER_SEED` | 0 | Stable event-ID namespace for isolated runs |
+| `STREAM_USE_CURRENT_TIME` | false | Use producer start time for freshness experiments |
 
 The data generator is deterministic: IDs, event times, entity associations, and ordering repeat for identical counts. Re-running it is therefore an intentional duplicate-replay test.
 
@@ -99,11 +104,11 @@ The following were performed locally on 2026-10-12 using isolated Compose volume
 - **Poison event:** one malformed record produced one `invalid_json` DLQ record. The consumer continued and committed its source offset only after DLQ acknowledgement.
 - **PostgreSQL outage:** with PostgreSQL stopped, a 15-record batch left group lag at 15 after retry exhaustion. Restarting PostgreSQL allowed the same uncommitted offsets to replay and lag returned to 0.
 
-The real Compose integration test passed 7 tests (six contract, configuration, and generator tests plus one Redpanda/PostgreSQL round-trip and replay-safety test).
+The real Compose integration suite now passes 9 tests, including PostgreSQL/Redpanda replay safety and concurrent-producer per-key ordering.
 
 ## Measured producer throughput
 
-One unthrottled local run produced 1,500 unique records, 15 configured duplicates, and one poison record in 9.2039 seconds: **164.7 acknowledged records/s**. The producer awaited each `acks=all` result sequentially. Docker Desktop, Redpanda, PostgreSQL, and the consumer shared the same Windows development machine used for the project benchmarks.
+The Step 18A baseline produced 1,500 unique records, 15 configured duplicates, and one poison record in 9.2039 seconds: **164.7 acknowledged records/s**. That producer awaited each `acks=all` result sequentially. Docker Desktop, Redpanda, PostgreSQL, and the consumer shared the same Windows development machine used for the project benchmarks. Step 18B measurements use the newer isolated harness and are reported separately.
 
 This is a reproducibility observation, not a production throughput claim. It intentionally measures the simple reliability-first producer, not Kafka batching potential. Consumer throughput was not independently benchmarked; the recovery checks only establish eventual drain to zero lag.
 
@@ -123,5 +128,7 @@ The consumer emits bounded topic/outcome/failure-code dimensions for:
 - **Apache Kafka** defines the protocol and ecosystem semantics used here. The .NET code uses the standard Confluent Kafka client and does not depend on a Redpanda-specific API.
 - **Redpanda** is the implemented local broker because a single pinned container provides a fast Kafka-compatible development environment. Its dev-container mode and replication factor one are explicitly not production topology.
 - **Azure Event Hubs** offers a Kafka-compatible endpoint but is only a proposed deployment option. It would require TLS/SASL configuration, Azure identity/network policy, partition and retention sizing, quota evaluation, and live compatibility tests. None of those cloud resources or claims are implemented here.
+
+Step 18B scalability methodology and local measurements are documented in [streaming-performance.md](streaming-performance.md).
 
 Proposed next steps—not implemented—include schema-registry governance, batched database writes, partition-parallel consumers, controlled backpressure, retention policies, authentication/TLS, autoscaling, alerts, and production replay tooling.

@@ -196,12 +196,12 @@ docs/                            Design, evaluation, operations, demo
 
 Key references: [Demo](docs/demo.md) · [Architecture](docs/architecture.md) · [Engineering decisions](docs/engineering-decisions.md) · [Evaluation](docs/evaluation.md) · [Performance](docs/performance.md) · [Semantic search](docs/semantic-search.md) · [Observability](docs/observability.md)
 
-Optional streaming: [Kafka-compatible event pipeline](docs/streaming.md). It uses a separate Compose override and does not change default startup.
+Optional streaming: [Kafka-compatible event pipeline](docs/streaming.md) and [scalability measurements](docs/streaming-performance.md). They use a separate Compose override and do not change default startup.
 
 ## Current limitations
 
 - The dataset is small, synthetic, and intentionally non-representative of production traffic.
-- No probabilistic identity matching, streaming ingestion, write API, authorization layer, or production secret store is included.
+- No probabilistic identity matching, general-purpose write API, authorization layer, or production secret store is included.
 - Embedding refresh is an explicit batch command; no scheduler or paid embedding integration is included.
 - The default Compose stack does not run an LLM. Configure an existing Ollama/OpenAI/Foundry provider before conversational use, or use the Development-only deterministic benchmark profile.
 - Cloud-provider behavior and latency are not covered by offline tests. Earlier Foundry identity verification succeeded live; campaign tools executed live, while campaign evidence initially failed. Exact rejected drafts were reproduced offline and fixed, but the final campaign fixes have not been revalidated by another paid cloud request.

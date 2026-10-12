@@ -3,11 +3,46 @@ using MediaIntelligence.Core.Data;
 using MediaIntelligence.Core.Models;
 using MediaIntelligence.Core.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace MediaIntelligence.Tests;
 
 public sealed class StreamingPipelineIntegrationTests
 {
+    [StreamingFact]
+    public async Task ConcurrentProducerPreservesOrderingWithinEachKey()
+    {
+        var bootstrap = Environment.GetEnvironmentVariable(
+            StreamingFactAttribute.KafkaVariable)!;
+        var options = Options.Create(new StreamingOptions
+        {
+            BootstrapServers = bootstrap,
+            ProducerViewingCount = 30,
+            ProducerAdCount = 10,
+            ProducerConcurrency = 32,
+            ProducerBatchSize = 100,
+            ProducerLingerMilliseconds = 5,
+            ProducerSeed = 424,
+            ProducerUseCurrentTime = true,
+            ProducerDuplicateEvery = 0,
+            ProducerIncludePoison = false
+        });
+        var producer = new SyntheticStreamingProducer(options,
+            NullLogger<SyntheticStreamingProducer>.Instance);
+        await producer.ProduceAsync();
+
+        var received = await ConsumeSeedAsync(bootstrap, 424, 40);
+        foreach (var group in received.GroupBy(item =>
+                     (item.Topic, item.Message.Key)))
+        {
+            var sequences = group.Select(item => Sequence(
+                StreamingEventCodec.Decode(item.Topic, item.Message.Value).EventId))
+                .ToArray();
+            Assert.Equal(sequences.OrderBy(item => item), sequences);
+        }
+    }
+
     [StreamingFact]
     public async Task RedpandaRoundTripAndPostgreSqlWriteAreReplaySafe()
     {
@@ -78,6 +113,36 @@ public sealed class StreamingPipelineIntegrationTests
                 return result;
         }
     }
+
+    private static async Task<IReadOnlyList<ConsumeResult<string, string>>>
+        ConsumeSeedAsync(string bootstrap, int seed, int expectedCount)
+    {
+        using var consumer = new ConsumerBuilder<string, string>(new ConsumerConfig
+        {
+            BootstrapServers = bootstrap,
+            GroupId = $"media-intelligence-order-test-{Guid.NewGuid():N}",
+            AutoOffsetReset = AutoOffsetReset.Earliest,
+            EnableAutoCommit = false
+        }).Build();
+        consumer.Subscribe([StreamingTopics.ViewingEvents,
+            StreamingTopics.AdImpressions]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var results = new List<ConsumeResult<string, string>>();
+        var minimum = (long)seed * 1_000_000;
+        while (results.Count < expectedCount)
+        {
+            var result = await Task.Run(() => consumer.Consume(timeout.Token));
+            var decoded = StreamingEventCodec.Decode(result.Topic,
+                result.Message.Value);
+            var sequence = Sequence(decoded.EventId);
+            if (sequence > minimum && sequence <= minimum + 999_999)
+                results.Add(result);
+        }
+        return results;
+    }
+
+    private static long Sequence(Guid id) =>
+        long.Parse(id.ToString()[^12..], System.Globalization.CultureInfo.InvariantCulture);
 }
 
 internal sealed class StreamingFactAttribute : FactAttribute

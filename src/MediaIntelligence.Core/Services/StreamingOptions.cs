@@ -16,6 +16,11 @@ public sealed class StreamingOptions
     public int ProducerBurstSize { get; set; } = 100;
     public int ProducerDuplicateEvery { get; set; }
     public bool ProducerIncludePoison { get; set; }
+    public int ProducerConcurrency { get; set; } = 1;
+    public int ProducerBatchSize { get; set; } = 1;
+    public int ProducerLingerMilliseconds { get; set; }
+    public int ProducerSeed { get; set; }
+    public bool ProducerUseCurrentTime { get; set; }
 }
 
 public sealed class StreamingOptionsValidator : IValidateOptions<StreamingOptions>
@@ -36,6 +41,14 @@ public sealed class StreamingOptionsValidator : IValidateOptions<StreamingOption
             failures.Add("Streaming producer counts and rates cannot be negative.");
         if (options.ProducerBurstSize < 1)
             failures.Add("Streaming:ProducerBurstSize must be at least 1.");
+        if (options.ProducerConcurrency is < 1 or > 1024)
+            failures.Add("Streaming:ProducerConcurrency must be between 1 and 1024.");
+        if (options.ProducerBatchSize is < 1 or > 100_000)
+            failures.Add("Streaming:ProducerBatchSize must be between 1 and 100000.");
+        if (options.ProducerLingerMilliseconds is < 0 or > 1000)
+            failures.Add("Streaming:ProducerLingerMilliseconds must be between 0 and 1000.");
+        if (options.ProducerSeed is < 0 or > 999_999)
+            failures.Add("Streaming:ProducerSeed must be between 0 and 999999.");
         return failures.Count == 0
             ? ValidateOptionsResult.Success
             : ValidateOptionsResult.Fail(failures);
