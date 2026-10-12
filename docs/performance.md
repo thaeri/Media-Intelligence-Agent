@@ -96,9 +96,28 @@ direct API operations across the two storage providers. Cumulative Prometheus
 histograms reported approximate p95 values of 45.24 ms agent, 4.79 ms local
 stub-LLM round, 23.68 ms campaign tool, 0.99 ms structured evidence review,
 0.10 ms InMemory repository operation, and 3.58 ms PostgreSQL repository
-operation. These internal percentiles came from explicit histogram buckets and
-the sequential capture, so they are diagnostic—not directly comparable to the
-k6 concurrency table.
+operation.
+
+### Why the k6 and OTel agent p95 values differ
+
+The 45.24 ms OTel agent p95 is not an independent measurement of the same
+population as the k6 2.609 ms InMemory or 11.933 ms PostgreSQL p95:
+
+- k6 used four concurrent VUs, excluded warm-up, and measured each storage
+  variant separately at the HTTP client;
+- the telemetry capture was a different, sequential PowerShell run and
+  accumulated requests from both API/storage instances;
+- the agent histogram did not include a storage-provider dimension, so the
+  Prometheus query merged InMemory and PostgreSQL observations;
+- Prometheus estimated the percentile from cumulative explicit buckets, while
+  k6 calculated it from its measured-phase samples.
+
+Those differences explain why the values are not comparable; they do not
+establish a corrected p95 or an instrumentation defect. A controlled follow-up
+would assign distinct service/storage resource attributes, run both collectors
+over the same k6 interval, and use rate-based histogram quantiles for that
+window. Until then, the OTel capture is useful only for locating relative spans
+inside its own run.
 
 ## Bottlenecks and caveats
 

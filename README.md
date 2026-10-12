@@ -1,606 +1,205 @@
 # Media Intelligence Agent
 
-A local-first .NET 10 reference implementation for grounded media analytics.
-The API combines deterministic analytics over synthetic OTT viewing data with
-an interchangeable Ollama, OpenAI, or Microsoft Foundry agent, tool calling,
-evidence verification,
-privacy-safe audience identity resolution, and structured observability.
+A portfolio-scale OTT and AdTech reference implementation for deterministic audience analytics with an evidence-verified AI interface. It combines consent-aware cross-device measurement, campaign reach and frequency, PostgreSQL/pgvector discovery, interchangeable LLM providers, and privacy-safe OpenTelemetry instrumentation.
 
-This repository is an engineering demonstration. It contains no production
-customer data, real device identifiers, or probabilistic identity matching.
+All included media, campaign, device, audience, and consent records are synthetic.
 
 ## What it demonstrates
 
-- Deterministic completion-rate and advertising-exposure analytics.
-- Single-title analytics and cross-title performance comparisons.
-- A configuration-selected LLM agent with explicit analytics tools and bounded
-  tool-call rounds; Ollama remains the default.
-- Numeric evidence verification by metric and title/cohort before a model
-  response is returned.
-- Synthetic cross-device audience deduplication using explicit pseudonymous
-  device-to-audience associations.
-- Default-deny consent handling for missing, denied, conflicting, or unknown
-  identity records.
-- Advertising reach, average frequency, coverage, and exclusion metrics.
-- Campaign-aware reach and frequency over explicit synthetic ad impressions
-  with optional UTC windows.
-- Structured request, LLM-round, and tool-call telemetry using `ILogger` and
-  OpenTelemetry traces and privacy-safe metrics.
-- Hybrid media discovery using pgvector cosine similarity plus deterministic
-  title/tag retrieval, explicit indexing, and safe lexical fallback.
-- Offline evaluation and regression tests that never call Ollama or OpenAI.
+- Deterministic content analytics: viewing sessions, completion rate, and ad-exposure rate.
+- Consent-aware identity resolution using explicit pseudonymous device-to-audience links only. Unknown, ambiguous, denied, and missing-consent identities are excluded by default.
+- Campaign measurement for impressions, eligible impressions, deduplicated reach, average frequency, and eligible coverage.
+- PostgreSQL 17 persistence with idempotent fixtures and an InMemory default for lightweight local use.
+- pgvector semantic media discovery combined with exact title/tag signals and explicit, opt-in indexing.
+- One tool-calling agent supporting Ollama, OpenAI, and Microsoft Foundry through configuration.
+- Versioned structured model output, deterministic evidence binding, privacy checks, and fail-closed rendering.
+- Optional Grafana, Tempo, Prometheus, and OpenTelemetry Collector services.
+- Offline tests and a deterministic local benchmark stub that never calls a paid model.
 
 ## Architecture
 
-The solution keeps HTTP transport, deterministic domain services, synthetic
-data, local model orchestration, evidence review, and telemetry separate:
-
-```text
-MediaIntelligence.Api
-  Controllers and dependency injection
-          |
-MediaIntelligence.Core
-  Agent | LLM provider factory | analytics | identity | evidence | telemetry
-          |
-Ollama | OpenAI API | Microsoft Foundry model inference
+```mermaid
+flowchart LR
+    Client[Client] --> API[ASP.NET Core API]
+    API --> Media[Media endpoints]
+    API --> Agent[Media agent]
+    Media --> Analytics[Deterministic analytics]
+    Agent --> LLM[Ollama / OpenAI / Foundry]
+    Agent --> Tools[Analytics and search tools]
+    Tools --> Analytics
+    Analytics --> Identity[Explicit identity + consent]
+    Analytics --> Store[(InMemory or PostgreSQL)]
+    Tools --> Search[Hybrid search]
+    Search --> Vector[(pgvector embeddings)]
+    Agent --> Verify[Structured evidence verifier]
+    Verify --> Render[Deterministic answer renderer]
+    API -. privacy-safe OTLP .-> Collector[OpenTelemetry Collector]
+    Collector --> Prometheus[Prometheus]
+    Collector --> Tempo[Tempo]
+    Prometheus --> Grafana[Grafana]
+    Tempo --> Grafana
 ```
 
-See [Architecture](docs/architecture.md) for the component diagram and request
-flow. Audience metric definitions are documented in
-[Privacy-safe audience identity metrics](docs/audience-identity-metrics.md).
-Campaign definitions are documented in
-[Campaign-aware audience metrics](docs/campaign-metrics.md).
-Reproducible local load-test methodology and measured results are in
-[Performance benchmarks](docs/performance.md).
+The model chooses tools and proposes typed claims; it does not calculate authoritative metrics. Tool results retain entity and metric provenance, and only schema-valid, evidence-supported claims reach the existing `answer` string. Invalid structured output is retried once and then returns a clear verification failure.
 
-## Technology stack
+See [Architecture](docs/architecture.md) and [Engineering decisions](docs/engineering-decisions.md).
 
-- .NET 10 / ASP.NET Core Web API
-- C# 14
-- Official OpenAI .NET client and Azure Identity
-- Ollama `qwen3:4b`
-- OpenAI Chat Completions with `gpt-4.1-mini` by default
-- Microsoft Foundry `/openai/v1/` model inference with Entra ID or API key
-- Entity Framework Core 10 and Npgsql for optional PostgreSQL persistence
-- xUnit and Microsoft Test SDK
-- `ILogger` structured logging
-- `System.Diagnostics.ActivitySource`
-- Optional OpenTelemetry Collector, Prometheus, Tempo, and Grafana stack
-- GitHub Actions using the .NET 10 SDK
+## Quick start
 
-No database or external telemetry backend is required. Storage defaults to the
-existing in-memory synthetic repository, and the default Ollama configuration
-requires no cloud account or paid request.
-
-## Optional local observability
-
-The default Compose stack remains PostgreSQL, migration/seed, and API only.
-Grafana, Tempo, Prometheus, and the OpenTelemetry Collector are enabled by an
-explicit profile and override file; no Jaeger, Loki, alerting, or model service
-is included.
-
-```powershell
-$env:POSTGRES_PASSWORD = "<local-development-password>"
-docker compose -f compose.yaml -f compose.observability.yaml `
-  --profile observability up --build -d
-```
-
-Open the provisioned dashboard at
-`http://localhost:3000/d/media-intelligence-observability/media-intelligence-agent-observability`.
-It shows API
-request rate and p50/p95/p99 latency, agent latency, LLM latency by provider,
-tool duration and errors, and evidence-verification failures. Prometheus
-exemplars link eligible metric samples to Tempo traces, and Tempo can derive
-matching Prometheus queries from trace resource attributes.
-
-Stop the optional stack with:
-
-```powershell
-docker compose -f compose.yaml -f compose.observability.yaml `
-  --profile observability down
-```
-
-Only Grafana and the existing API bind to host loopback; collector,
-Prometheus, Tempo, and PostgreSQL remain private to the Compose network.
-Telemetry records bounded provider/model, tool, outcome, route, duration, and
-status attributes. It does not record prompts, model responses, tool payloads,
-credentials, raw device IDs, or audience IDs. Anonymous Grafana access and the
-example database password are local-development conveniences, not production
-security settings. See [Local observability](docs/observability.md).
-
-## Reproducible local benchmarks
-
-Step 17B adds an opt-in k6 profile comparing the identical synthetic fixtures
-through InMemory and PostgreSQL storage. It covers catalog, content analytics,
-campaign analytics, the complete agent tool/evidence path, one bounded retry,
-and repeated-invalid fail-closed behavior. The deterministic chat stub is
-enabled only by `Benchmark:Enabled` in Development; startup rejects that switch
-in every other environment. It never calls Ollama or a paid provider.
-
-```powershell
-$env:POSTGRES_PASSWORD = "<local-development-password>"
-docker compose -f compose.yaml -f compose.benchmark.yaml `
-  --profile benchmark up --build -d postgres migrate api api-memory
-docker compose -f compose.yaml -f compose.benchmark.yaml `
-  --profile benchmark run --rm k6
-```
-
-Use `BENCHMARK_BASE_URL`, `BENCHMARK_STORAGE`, and `BENCHMARK_MODE` to select
-`api`, `agent-success`, `agent-retry`, or `agent-failure`; full commands and
-interpretation guidance are in [docs/performance.md](docs/performance.md).
-Generated JSON summaries remain untracked under `benchmarks/results/`.
-
-## Windows setup
-
-### Prerequisites
-
-1. Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
-2. Install [Ollama for Windows](https://ollama.com/download/windows).
-3. Pull the configured model:
-
-```powershell
-ollama pull qwen3:4b
-```
-
-Confirm the model is available:
-
-```powershell
-ollama list
-```
-
-### Restore, build, and test
-
-From the repository root:
-
-```powershell
-dotnet restore MediaIntelligence.slnx
-dotnet build MediaIntelligence.slnx -c Release --no-restore
-dotnet test MediaIntelligence.slnx -c Release --no-build --no-restore
-```
-
-### Run the API
-
-Start Ollama, then run:
-
-```powershell
-dotnet run --project src/MediaIntelligence.Api --launch-profile http
-```
-
-The HTTP launch profile listens on `http://localhost:5215`. The agent client
-connects to Ollama at `http://localhost:11434/v1` and uses `qwen3:4b`.
-
-## Storage configuration
-
-`Storage:Provider` accepts `InMemory` or `PostgreSQL` and defaults to
-`InMemory`. Both implementations satisfy the same repository contract, so API
-responses, analytics, agent tools, evidence verification, and privacy rules do
-not change when storage is switched.
-
-PostgreSQL persists media content, viewing events, campaigns, ad impressions,
-pseudonymous device-to-audience associations, and consent state. Configure its
-connection string through an environment variable or User Secrets; no
-connection string is checked in:
-
-```powershell
-$env:Storage__Provider = "PostgreSQL"
-$env:ConnectionStrings__PostgreSQL = "<postgresql-connection-string>"
-```
-
-```powershell
-dotnet user-secrets set "Storage:Provider" "PostgreSQL" --project src/MediaIntelligence.Api
-dotnet user-secrets set "ConnectionStrings:PostgreSQL" "<postgresql-connection-string>" --project src/MediaIntelligence.Api
-```
-
-Apply the checked-in migration explicitly:
-
-```powershell
-$env:ConnectionStrings__PostgreSQL = "<postgresql-connection-string>"
-dotnet ef database update --project src/MediaIntelligence.Core --startup-project src/MediaIntelligence.Api
-```
-
-Production never migrates automatically. A disposable local Development
-environment can explicitly apply migrations and run the deterministic,
-idempotent seed as a one-shot command:
-
-```powershell
-$env:ASPNETCORE_ENVIRONMENT = "Development"
-$env:Storage__Provider = "PostgreSQL"
-$env:ConnectionStrings__PostgreSQL = "<postgresql-connection-string>"
-dotnet run --project src/MediaIntelligence.Api -- --migrate-and-seed
-```
-
-The command refuses to run outside Development or without PostgreSQL selected.
-It exits when complete, so normal API instances never race to migrate. The seed
-preserves the documented campaign fixtures: City Stories Launch is `10` total /
-`5` eligible / reach `2` / frequency `2.5` / coverage `50%`; Desert Heroes
-Encore is `10` / `6` / `2` / `3.0` / `60%`.
-
-The optional real-PostgreSQL parity test is skipped unless a connection to a
-dedicated database whose name contains `test` is supplied:
-
-```powershell
-$env:MEDIAINTELLIGENCE_TEST_POSTGRES = "<dedicated-test-database-connection-string>"
-dotnet test MediaIntelligence.slnx -c Release
-```
-
-The test uses Npgsql and the real migration; it does not substitute EF's
-in-memory provider.
-
-## Docker Compose quick start
-
-The Compose environment contains PostgreSQL with pgvector available, a
-one-shot migration/seed service, and the API. It does not include Ollama or
-download any model. Copy the example environment and replace the development
-password before starting:
+Requirements: Docker Desktop with Compose. Copy the development environment template and choose a local-only database password:
 
 ```powershell
 Copy-Item .env.example .env
-# Edit POSTGRES_PASSWORD in .env.
-docker compose up --build --detach
+# Edit POSTGRES_PASSWORD in .env
+docker compose up --build -d
 docker compose ps
-```
-
-PostgreSQL has no host port. The API is bound to loopback at
-`http://localhost:5215` by default. Check health and deterministic data:
-
-```powershell
 Invoke-RestMethod http://localhost:5215/health
 Invoke-RestMethod http://localhost:5215/api/media
 ```
 
-Run the real PostgreSQL migration/idempotency/parity test inside the private
-Compose network:
+The expected health response is `Healthy`. The default Compose stack starts PostgreSQL, runs migrations and deterministic seeding once, then starts the non-root API. PostgreSQL is not published to the host. Ollama is deliberately not part of the default stack.
+
+For a reproducible five-minute tour—including campaign analytics, identity checks, pgvector indexing, the deterministic structured-agent path, and optional Grafana—follow [docs/demo.md](docs/demo.md).
+
+To run directly with the lightweight default instead:
 
 ```powershell
-docker compose --profile test run --rm integration-tests
+dotnet restore MediaIntelligence.slnx
+dotnet run --project src/MediaIntelligence.Api
 ```
 
-Create or refresh deterministic local media embeddings explicitly (this is not
-part of the default stack and makes no network or paid-model call):
+This uses `Storage:Provider=InMemory` and Ollama `qwen3:4b` at `http://localhost:11434` unless configuration overrides them.
+
+## API and agent
+
+Stable public contracts:
+
+```http
+GET  /health
+GET  /api/media
+GET  /api/media/{contentId}/analytics
+POST /api/agent/ask
+Content-Type: application/json
+
+{"question":"Compare City Stories Launch and Desert Heroes Encore."}
+```
+
+The agent can call:
+
+| Tool | Purpose |
+| --- | --- |
+| `get_content_analytics` | Single-title viewing analytics |
+| `compare_content_performance` | Cross-title viewing comparison |
+| `get_audience_identity_metrics` | Consent-aware reach and frequency for a title |
+| `get_campaign_performance` | Campaign metrics with optional UTC bounds |
+| `compare_campaign_performance` | Attributed campaign metrics and deterministic deltas |
+| `search_media_content` | Aggregate-safe hybrid title/tag/vector discovery |
+
+Campaign and identity tools return aggregate evidence only; raw device IDs, audience IDs, and mappings are never provided to the model. Metric definitions are documented in [campaign metrics](docs/campaign-metrics.md) and [audience identity metrics](docs/audience-identity-metrics.md).
+
+## LLM providers
+
+`Llm:Provider` accepts `Ollama` (default), `OpenAI`, or `Foundry`. Provider-specific options are validated at startup, there is no silent fallback, and credentials belong in environment variables or .NET User Secrets—not tracked settings files.
+
+```powershell
+# Ollama
+$env:Llm__Provider = "Ollama"
+$env:Llm__Ollama__Endpoint = "http://localhost:11434"
+$env:Llm__Ollama__Model = "qwen3:4b"
+
+# OpenAI
+$env:Llm__Provider = "OpenAI"
+$env:Llm__OpenAI__ApiKey = "<secret>"
+$env:Llm__OpenAI__Model = "<tool-capable-model>"
+
+# Microsoft Foundry / Azure OpenAI v1 endpoint
+$env:Llm__Provider = "Foundry"
+$env:Llm__Foundry__Endpoint = "https://<resource>.openai.azure.com/openai/v1"
+$env:Llm__Foundry__Deployment = "<deployment>"
+# Use Azure CLI / managed identity, or Llm__Foundry__ApiKey locally.
+```
+
+Configuration details, Azure prerequisites, and truthful live-validation status are in [Architecture](docs/architecture.md) and [Evaluation](docs/evaluation.md). Paid cloud calls are never made by tests.
+
+## Privacy and reliability
+
+- Identity matching is explicit and deterministic—never inferred from IP address, location, fingerprinting, or probability.
+- Consent is default-deny. Missing consent is not consent.
+- `AdShown` contributes at most one eligible impression per viewing event; campaign impressions are separate first-class events.
+- Strict response schema v1 rejects unknown versions, fields, invalid units, unsupported numbers, bad attribution, incorrect comparison direction, and excessive size/depth.
+- Evidence references bind every numerical claim to tool executions; deltas are recomputed from source metrics.
+- Full prompts, model responses, credentials, and pseudonymous identifiers are excluded from normal logs and telemetry.
+- Local rejected-draft diagnostics are opt-in, Development-only, redacted, short-lived, and written outside the repository.
+
+## Storage and semantic search
+
+`Storage:Provider` is `InMemory` by default and `PostgreSQL` in Compose. Production startup never auto-migrates. The explicit `migrate` service applies checked-in migrations and runs idempotent synthetic seeding before the API starts.
+
+Media embeddings store content ID, model, dimension, content hash/version, timestamp, and a pgvector value. Indexing is explicit:
 
 ```powershell
 docker compose --profile search run --rm index-media
 ```
 
-Confirm the image supplies pgvector:
+The built-in deterministic embedding provider exists for offline tests and local demonstrations; production indexing must select and govern an appropriate embedding provider. Stale, missing, or incompatible embeddings are excluded from vector scoring. See [Semantic search](docs/semantic-search.md).
+
+## Testing
 
 ```powershell
-docker compose exec postgres psql -U media_app -d media_intelligence_test -c "SELECT name, default_version FROM pg_available_extensions ORDER BY name;"
+dotnet test MediaIntelligence.slnx -c Release
+dotnet build MediaIntelligence.slnx -c Release --no-restore
+
+# Real PostgreSQL/pgvector tests; Docker required
+docker compose --profile test run --rm integration-tests
+
+# NuGet vulnerability audit
+dotnet list MediaIntelligence.slnx package --vulnerable --include-transitive
 ```
 
-If you changed `POSTGRES_USER` or `POSTGRES_DB`, substitute those values in the
-command and confirm the result contains `vector`.
+The normal test suite is offline and uses no Ollama, OpenAI, Foundry, API keys, or EF InMemory substitute. PostgreSQL parity tests run only when their real connection string is supplied; the Compose test service provides it.
 
-Restart only the API to verify database persistence:
+## Observability
+
+The API emits privacy-safe traces and metrics for request, agent, LLM round, tool, evidence, and repository timing. Start the optional stack explicitly:
 
 ```powershell
-docker compose restart api
-Invoke-RestMethod http://localhost:5215/api/media
+docker compose -f compose.yaml -f compose.observability.yaml `
+  --profile observability up -d --build
 ```
 
-Stop containers while retaining the database volume with `docker compose
-down`. Use `docker compose down --volumes` only when intentionally deleting the
-local database.
+Grafana is available at [http://localhost:3000](http://localhost:3000) with provisioned Prometheus/Tempo data sources and a Media Intelligence dashboard. The dashboard covers API rate and p50/p95/p99 latency, agent and provider latency, tool duration/errors, and evidence failures. See [Observability](docs/observability.md).
 
-Agent calls remain optional. The default Compose stack runs no model server.
-Configure host Ollama, OpenAI, or Foundry separately with the existing `Llm:*`
-environment variables and secrets described below. Cloud keys must remain in
-the untracked `.env`, environment, or User Secrets and must never be placed in
-`compose.yaml`.
+## Measured local performance
 
-Troubleshooting:
+These are engineering measurements, not production capacity claims. On a Windows 11 laptop (Intel Core i7-1255U, Docker Desktop 29.8.1), each row used four VUs, a three-second warm-up, and a ten-second measured window with the deterministic local chat stub:
 
-- If `migrate` fails, inspect `docker compose logs migrate postgres`; the API
-  intentionally remains stopped.
-- If the API is unhealthy, inspect `docker compose logs api` and verify the
-  `migrate` service exited with code zero.
-- If port 5215 is occupied, set `API_PORT` in `.env`.
-- If credentials change after the volume is created, remove the volume only if
-  its local data is disposable, then recreate the stack.
+| Workload | Storage | Throughput | p50 | p95 | p99 | Errors |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| API workflow, 3 requests | InMemory | 2,342.9 workflows/s | 1.188 ms | 2.704 ms | 3.705 ms | 0% |
+| API workflow, 3 requests | PostgreSQL | 481.6 workflows/s | 6.742 ms | 14.056 ms | 20.657 ms | 0% |
+| Agent success | InMemory | 2,094.0 requests/s | 1.629 ms | 2.609 ms | 3.206 ms | 0% |
+| Agent success | PostgreSQL | 414.3 requests/s | 9.180 ms | 11.933 ms | 13.522 ms | 0% |
 
-This setup is for local development. The example uses one database credential,
-unencrypted traffic on a private Docker network, a locally stored Docker
-volume, and no secret manager, backup, TLS, resource limits, or production
-hardening.
+The stub exercises the real SDK, tool execution, structured validation, evidence review, and rendering, but has no token-generation or remote-network latency. A separate OTel capture reported a 45.24 ms agent p95; it combined storage variants in a different sequential sample and used cumulative histogram interpolation, so it is not comparable to the per-variant k6 p95. The investigation and complete results—including retry/failure scenarios—are in [Performance](docs/performance.md).
 
-## LLM provider configuration
-
-`Llm:Provider` accepts `Ollama`, `OpenAI`, or `Foundry` (case-insensitive) and
-defaults to `Ollama`. Only the selected provider is validated and registered;
-invalid configuration fails startup and never silently falls back.
-
-The checked-in defaults contain endpoints, models, and timeouts but no secrets:
-
-```json
-{
-  "Llm": {
-    "Provider": "Ollama",
-    "Ollama": {
-      "Endpoint": "http://localhost:11434/v1",
-      "Model": "qwen3:4b",
-      "TimeoutSeconds": 600
-    },
-    "OpenAI": {
-      "Endpoint": "https://api.openai.com/v1",
-      "Model": "gpt-4.1-mini",
-      "TimeoutSeconds": 120
-    },
-    "Foundry": {
-      "Authentication": "EntraId",
-      "TimeoutSeconds": 120
-    }
-  }
-}
-```
-
-Use environment variables for a temporary provider switch:
-
-```powershell
-# OpenAI
-$env:Llm__Provider = "OpenAI"
-$env:Llm__OpenAI__ApiKey = "<secret>"
-
-# Microsoft Foundry with Microsoft Entra ID
-$env:Llm__Provider = "Foundry"
-$env:Llm__Foundry__Endpoint = "https://<resource>.services.ai.azure.com/openai/v1/"
-$env:Llm__Foundry__Deployment = "<deployment-name>"
-$env:Llm__Foundry__Authentication = "EntraId"
-az login
-```
-
-Or store local secrets with the API project's User Secrets ID:
-
-```powershell
-dotnet user-secrets set "Llm:Provider" "OpenAI" --project src/MediaIntelligence.Api
-dotnet user-secrets set "Llm:OpenAI:ApiKey" "<secret>" --project src/MediaIntelligence.Api
-
-dotnet user-secrets set "Llm:Provider" "Foundry" --project src/MediaIntelligence.Api
-dotnet user-secrets set "Llm:Foundry:Endpoint" "https://<resource>.openai.azure.com/openai/v1/" --project src/MediaIntelligence.Api
-dotnet user-secrets set "Llm:Foundry:Deployment" "<deployment-name>" --project src/MediaIntelligence.Api
-```
-
-Foundry supports `EntraId` (recommended) and `ApiKey`. Entra ID uses
-`DefaultAzureCredential` and requires an authenticated developer identity or
-managed identity with permission to invoke the deployment. For API-key auth,
-set `Llm:Foundry:Authentication` to `ApiKey` and provide
-`Llm:Foundry:ApiKey` through an environment variable or User Secrets.
-
-This integration intentionally accepts only Azure model-inference endpoints
-ending in `/openai/v1/` on `*.openai.azure.com` or
-`*.services.ai.azure.com`. Native Foundry project and agent endpoints use
-different API shapes and are rejected at startup rather than assumed to be
-OpenAI-compatible.
-
-## API
-
-### List synthetic media titles
-
-```http
-GET http://localhost:5215/api/media
-```
-
-### Get deterministic analytics for one title
-
-```http
-GET http://localhost:5215/api/media/22222222-2222-2222-2222-222222222222/analytics
-```
-
-### Ask the agent
-
-```http
-POST http://localhost:5215/api/agent/ask
-Content-Type: application/json
-
-{
-  "question": "For City Stories, what is the cross-device audience reach and average ad frequency?"
-}
-```
-
-The success response contract is:
-
-```json
-{
-  "answer": "..."
-}
-```
-
-The agent endpoint requires the selected provider. The media-list and
-deterministic analytics endpoints do not make an LLM call.
-
-## Agent tools
-
-| Tool | Purpose |
-| --- | --- |
-| `get_content_analytics` | Viewing sessions, completion rate, and ad-exposure rate for one title. |
-| `compare_content_performance` | Completion and advertising-exposure comparison across all titles. |
-| `get_audience_identity_metrics` | Aggregate cross-device reach, frequency, coverage, and exclusion counts for one title. |
-| `get_campaign_performance` | Consent-aware impression, reach, frequency, coverage, and exclusions for one campaign and optional UTC window. |
-| `compare_campaign_performance` | Aggregate comparison across synthetic campaigns for an optional UTC window. |
-| `search_media_content` | Ordered hybrid semantic/title/tag discovery with existing aggregate viewing analytics. |
-
-Tool results use synthetic aggregates. The audience identity tool never returns
-raw `DeviceId` or `AudienceId` values to the model. Search results never return
-stored vectors, content hashes, or identity mappings.
-
-## Evidence verification
-
-Before an agent answer crosses the response boundary,
-the model must return structured response schema version `1.0`. Each typed
-metric claim names its entity, canonical metric, value, unit, and one or more
-references to actual tool executions. Comparison claims additionally include
-both operands and direction. The application validates operand provenance and
-recomputes every delta before deterministic rendering.
-
-- Unknown fields, versions, metrics, units, or evidence references are rejected.
-- Fabricated values, reversed comparisons, and invalid attribution are rejected.
-- Raw device/audience IDs, GUIDs, markup, and control characters are rejected.
-- Payload size, JSON depth, section count, claim count, and reference count are bounded.
-
-OpenAI and Foundry request the SDK's strict JSON-schema response format. Ollama
-uses JSON mode because endpoint-level strict-schema capability is not assumed;
-all providers receive identical application-side validation. One corrective
-retry is allowed. If it also fails, the draft is discarded and a fixed
-verification-failure answer is returned. Free-form model narrative is never
-rendered. The older `EvidenceReviewerService` remains covered for regression
-comparison but is not a fallback acceptance path.
-
-## Privacy and consent model
-
-- All audience and device values are synthetic opaque pseudonyms.
-- Resolution uses only explicit device-to-audience associations.
-- One device must map unambiguously to one audience.
-- Consent must be explicitly granted; missing consent is denied by default.
-- Unknown devices, conflicting mappings, denied consent, and missing consent
-  are excluded and counted in aggregate.
-- No IP address, location, fingerprint, or probabilistic matching is used.
-- `AdShown` contributes at most one impression per viewing event.
-
-Reach is distinct eligible audiences. Average frequency is eligible impressions
-divided by reached audiences, with zero returned for a zero denominator.
-
-## Testing and evaluation
-
-The current offline suite contains 120 tests covering:
-
-- Completion and advertising-exposure calculations.
-- Evidence acceptance, unsupported claims, malformed evidence, and wrong-title
-  or wrong-metric attribution.
-- Explicit identity resolution, multi-device deduplication, separate audiences,
-  conflicts, unknown devices, and consent default-deny behavior.
-- Reach, frequency, coverage, exclusions, and zero-impression behavior.
-- Telemetry completion, failure, and timeout states.
-- The final response boundary, aggregate-only identity evidence, identifier
-  non-disclosure, and the `{ "answer": ... }` API contract.
-- Campaign filtering, cross-device deduplication, consent exclusions, UTC
-  boundaries, zero denominators, unknown campaigns, evidence attribution,
-  identifier non-disclosure, and API serialization.
-- Deterministic embeddings, hybrid ranking, thresholds, stable ordering,
-  idempotent refresh, stale/missing/incompatible vectors, privacy, and evidence
-  rejection. See [semantic search definitions](docs/semantic-search.md).
-- Structured schema/version rejection, exact tool-execution binding, metric and
-  unit attribution, recomputed comparisons including zero deltas, captured
-  Foundry-format JSON, injection/privacy rejection, limits, and bounded retry.
-
-Tests inject fake model text and never call Ollama, OpenAI, or Foundry. Provider
-tests validate selection and configuration without sending network requests. See
-[Evaluation](docs/evaluation.md) for scenarios and live-smoke observations.
-
-## Telemetry
-
-Each agent request records structured fields for:
-
-- Correlation/request ID and final status.
-- Total duration.
-- LLM round count and individual round durations.
-- Tool-call count, tool names, and individual durations.
-- Evidence-verification outcome.
-- Selected provider and model (never endpoint or credentials).
-
-Activities use the source name `MediaIntelligence.Agent`. No exporter is
-configured. Logs intentionally omit prompts, complete model responses, tool
-payloads, device IDs, audience IDs, endpoints, and credentials.
-
-## Manual provider smoke tests
-
-Cloud smoke tests can incur cost and are not part of the offline suite. After
-configuring exactly one provider, run the API and submit the existing agent
-request shown above. Confirm HTTP 200, an analytics tool call, evidence
-verification success, and telemetry fields for the expected provider/model.
-Clear secret environment variables or User Secrets after the test. Never paste
-credentials into request bodies, logs, or tracked settings files.
-
-### Provider validation status
-
-| Provider | Offline configuration | Live validation | Authentication tested |
-| --- | --- | --- | --- |
-| Ollama | Passed | Content comparison and identity flows passed | Local placeholder credential |
-| OpenAI | Passed | Not run | Not run |
-| Microsoft Foundry | Passed | Identity flow passed; campaign tools executed, but live campaign evidence verification did not pass | Microsoft Entra ID |
-
-The successful Foundry identity smoke test exercised startup validation,
-provider selection, two LLM rounds, `get_audience_identity_metrics`, evidence
-verification, and the public response boundary. Separate Foundry campaign
-comparison smoke tests successfully executed the campaign tools and returned
-the expected aggregate values, but their final drafts did not pass live
-evidence verification. The redacted rejected drafts were captured and added as
-exact deterministic offline regressions; all now pass. The final evidence fixes
-have not been revalidated by another live cloud request. No credentials or
-cloud resource identifiers were persisted. OpenAI remains offline-tested only;
-no paid OpenAI request has been made.
-
-## Measured smoke observations
-
-The Ollama rows are observations from one Windows development machine running
-CPU-only. The Foundry row is one cloud-provider observation. These are not
-performance benchmarks:
-
-| Scenario | HTTP | LLM rounds | Tool | Tool time | Total time |
-| --- | ---: | ---: | --- | ---: | ---: |
-| Cross-title completion comparison | 200 | 2 | `compare_content_performance` | 18 ms | 248.8 s |
-| City Stories reach/frequency | 200 | 2 | `get_audience_identity_metrics` | 28.7 ms | 607.7 s |
-| City Stories reach/frequency (Foundry) | 200 | 2 | `get_audience_identity_metrics` | 11.9 ms | 19.24 s |
-
-Both Ollama runs completed with evidence verification passing. The identity run
-produced deterministic tool values of reach `2` and frequency `15.5`. Its HTTP
-body could not be retained by the Windows PowerShell 5 smoke client after the
-server returned 200, so final-response privacy is additionally covered by the
-offline boundary integration test rather than claimed from that capture.
-
-The Foundry run returned the same deterministic reach `2` and frequency
-`15.5`, passed evidence verification, and contained no raw device or audience
-identifiers. The later Foundry campaign comparison attempts are excluded from
-this performance table: their tool execution succeeded, but final live evidence
-verification failed. Their exact redacted drafts now pass offline regression
-tests; the final fixes have not received another live cloud validation. These
-observations are single runs, not comparative benchmarks.
-
-## Limitations
-
-- Synthetic in-memory data only; no persistence or production data ingestion.
-- Seeded event behavior is intended for demonstration, not statistical study.
-- Explicit identity associations only; no identity graph or probabilistic
-  resolution.
-- Consent is a current synthetic snapshot without policy, purpose, region, or
-  historical versioning.
-- Viewing-event reach/frequency has no campaign dimension; campaign analytics
-  supplies campaign and optional UTC-window dimensions over separate impression
-  records.
-- Campaign analytics has no advertiser, budget, creative, placement,
-  conversion, revenue, or consent-history dimensions.
-- One boolean `AdShown` value represents at most one impression per event.
-- Evidence extraction is deterministic text/JSON matching, not semantic proof.
-- The model may be slow on CPU-only Ollama installations.
-- Provider support uses Chat Completions-compatible tool calling. Native
-  Foundry project/agent APIs and provider-specific features are out of scope.
-- OpenAI and Foundry availability, deployment permissions, quotas, latency,
-  and cost depend on the configured cloud account.
-- OpenTelemetry export is disabled by default; optional local Tempo and
-  Prometheus retention is development-only and volume-bound.
-- There is currently no license file; public reuse terms are therefore not
-  granted until the repository owner selects a license.
-
-## Roadmap
-
-Potential next steps, not currently implemented:
-
-- Advertiser, creative, placement, budget, conversion, and revenue dimensions.
-- Purpose- and policy-aware consent records with history.
-- OpenTelemetry export and dashboards.
-- Additional provider-specific integration and contract tests against opt-in
-  test deployments.
-- API-level integration tests with an in-memory host.
-- Additional evaluation fixtures and automated quality thresholds.
-
-## Repository layout
+## Repository map
 
 ```text
-src/MediaIntelligence.Api/       ASP.NET Core API and composition root
-src/MediaIntelligence.Core/      Models, repository, analytics, agent, evidence
-tests/MediaIntelligence.Tests/   Deterministic unit and integration tests
-docs/                            Architecture, metrics, and evaluation notes
-.github/workflows/               Offline CI workflow
+src/MediaIntelligence.Api/       HTTP API, DI, provider and telemetry setup
+src/MediaIntelligence.Core/      Domain, analytics, persistence, search, agent
+tests/MediaIntelligence.Tests/   Offline and opt-in PostgreSQL tests
+benchmarks/                      Pinned k6 workload
+observability/                   Collector, Prometheus, Tempo, Grafana config
+docs/                            Design, evaluation, operations, demo
 ```
 
-## License
+Key references: [Demo](docs/demo.md) · [Architecture](docs/architecture.md) · [Engineering decisions](docs/engineering-decisions.md) · [Evaluation](docs/evaluation.md) · [Performance](docs/performance.md) · [Semantic search](docs/semantic-search.md) · [Observability](docs/observability.md)
 
-No license has been selected. All rights remain with the repository owner.
+## Current limitations
+
+- The dataset is small, synthetic, and intentionally non-representative of production traffic.
+- No probabilistic identity matching, streaming ingestion, write API, authorization layer, or production secret store is included.
+- Embedding refresh is an explicit batch command; no scheduler or paid embedding integration is included.
+- The default Compose stack does not run an LLM. Configure an existing Ollama/OpenAI/Foundry provider before conversational use, or use the Development-only deterministic benchmark profile.
+- Cloud-provider behavior and latency are not covered by offline tests. Earlier Foundry identity verification succeeded live; campaign tools executed live, while campaign evidence initially failed. Exact rejected drafts were reproduced offline and fixed, but the final campaign fixes have not been revalidated by another paid cloud request.
+- Benchmark numbers are local short-run measurements and must not be treated as SLOs or capacity guidance.
