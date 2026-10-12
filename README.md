@@ -11,6 +11,7 @@ All included media, campaign, device, audience, and consent records are syntheti
 - Campaign measurement for impressions, eligible impressions, deduplicated reach, average frequency, and eligible coverage.
 - PostgreSQL 17 persistence with idempotent fixtures and an InMemory default for lightweight local use.
 - pgvector semantic media discovery combined with exact title/tag signals and explicit, opt-in indexing.
+- Optional Kafka-compatible Redpanda ingestion with versioned events, durable idempotency, replay safety, and DLQ handling.
 - One tool-calling agent supporting Ollama, OpenAI, and Microsoft Foundry through configuration.
 - Versioned structured model output, deterministic evidence binding, privacy checks, and fail-closed rendering.
 - Optional Grafana, Tempo, Prometheus, and OpenTelemetry Collector services.
@@ -194,6 +195,8 @@ docs/                            Design, evaluation, operations, demo
 ```
 
 Key references: [Demo](docs/demo.md) · [Architecture](docs/architecture.md) · [Engineering decisions](docs/engineering-decisions.md) · [Evaluation](docs/evaluation.md) · [Performance](docs/performance.md) · [Semantic search](docs/semantic-search.md) · [Observability](docs/observability.md)
+
+Optional streaming: [Kafka-compatible event pipeline](docs/streaming.md). It uses a separate Compose override and does not change default startup.
 
 ## Current limitations
 

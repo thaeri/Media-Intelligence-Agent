@@ -78,6 +78,37 @@
       "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, storage_provider, storage_operation) (rate(media_storage_operation_duration_seconds_bucket[5m])))", "legendFormat": "{{storage_provider}} {{storage_operation}}", "exemplar": true }],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Streaming throughput",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (topic) (rate(media_streaming_events_processed_total[5m]))", "legendFormat": "{{topic}}", "exemplar": true }],
+      "fieldConfig": { "defaults": { "unit": "eps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 }
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Consumer lag",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max by (topic) (media_streaming_consumer_lag_messages)", "legendFormat": "{{topic}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 }
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Event freshness p95",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, topic) (rate(media_streaming_event_freshness_seconds_bucket[5m])))", "legendFormat": "{{topic}}", "exemplar": true }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 }
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "Streaming duplicates / DLQ",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (topic) (increase(media_streaming_events_duplicates_total[5m]))", "legendFormat": "duplicates {{topic}}" },
+        { "refId": "B", "expr": "sum by (source_topic) (increase(media_streaming_events_dlq_total[5m]))", "legendFormat": "DLQ {{source_topic}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 40 }
     }
   ],
   "refresh": "10s",

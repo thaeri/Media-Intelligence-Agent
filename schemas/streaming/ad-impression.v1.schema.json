@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-intelligence.local/schemas/ad-impression.v1.schema.json",
+  "title": "Ad impression v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "eventTimeUtc", "data"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventTimeUtc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "campaignId", "contentId"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "campaignId": { "type": "string", "format": "uuid" },
+        "contentId": { "type": "string", "format": "uuid" },
+        "deviceId": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    }
+  }
+}

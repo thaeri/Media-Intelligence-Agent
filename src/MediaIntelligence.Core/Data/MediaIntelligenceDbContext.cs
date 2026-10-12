@@ -20,6 +20,7 @@ public sealed class MediaIntelligenceDbContext : DbContext
     internal DbSet<CampaignEntity> Campaigns => Set<CampaignEntity>();
     internal DbSet<AdImpressionEntity> AdImpressions => Set<AdImpressionEntity>();
     internal DbSet<MediaEmbeddingEntity> MediaEmbeddings => Set<MediaEmbeddingEntity>();
+    internal DbSet<StreamIngestionEntity> StreamIngestions => Set<StreamIngestionEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -149,6 +150,19 @@ public sealed class MediaIntelligenceDbContext : DbContext
                 "CK_media_embedding_content_version",
                 "\"ContentVersion\" > 0"));
         });
+
+        modelBuilder.Entity<StreamIngestionEntity>(entity =>
+        {
+            entity.ToTable("stream_ingestion");
+            entity.HasKey(item => new { item.Topic, item.EventId });
+            entity.Property(item => item.Topic).HasMaxLength(200);
+            entity.Property(item => item.PayloadSha256).HasMaxLength(64);
+            entity.Property(item => item.EventTimeUtc)
+                .HasColumnType("timestamp with time zone");
+            entity.Property(item => item.ProcessedAtUtc)
+                .HasColumnType("timestamp with time zone");
+            entity.HasIndex(item => item.ProcessedAtUtc);
+        });
     }
 }
 
@@ -220,4 +234,13 @@ internal sealed class MediaEmbeddingEntity
     public int ContentVersion { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
     public Vector Embedding { get; set; } = new(Array.Empty<float>());
+}
+
+internal sealed class StreamIngestionEntity
+{
+    public string Topic { get; set; } = string.Empty;
+    public Guid EventId { get; set; }
+    public string PayloadSha256 { get; set; } = string.Empty;
+    public DateTime EventTimeUtc { get; set; }
+    public DateTime ProcessedAtUtc { get; set; }
 }

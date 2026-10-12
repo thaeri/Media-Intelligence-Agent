@@ -149,6 +149,24 @@ Repository operations are wrapped by `InstrumentedMediaRepository`, which
 records bounded provider/operation/outcome latency labels without query values
 or identity data.
 
+## Optional Kafka-compatible ingestion
+
+`compose.streaming.yaml` adds a pinned single-node Redpanda development broker,
+an idempotent topic initializer, a deterministic .NET producer, and a .NET
+`BackgroundService` consumer. It is opt-in and does not alter the default
+Compose graph. Viewing events are keyed by content ID; ad impressions are
+keyed by campaign ID. Both use strict versioned JSON envelopes with stable IDs
+and UTC event time.
+
+The consumer validates before persistence and disables automatic offset
+commits. A PostgreSQL transaction writes the existing domain table and a
+`stream_ingestion` ledger row keyed by `(topic, eventId)`. The source offset is
+committed only after that transaction, or after an invalid event is durably
+published to `media-events.dlq.v1`. Bounded infrastructure retries leave the
+offset uncommitted for safe replay. This is at-least-once delivery with durable
+idempotency, not a cross-system exactly-once transaction. See
+[streaming.md](streaming.md).
+
 ## Hybrid semantic discovery
 
 `search_media_content` combines exact pgvector cosine similarity with

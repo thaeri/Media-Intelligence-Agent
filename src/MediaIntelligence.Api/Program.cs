@@ -12,6 +12,7 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 var benchmarkEnabled = builder.Configuration.GetValue<bool>("Benchmark:Enabled");
+var streamingEnabled = builder.Configuration.GetValue<bool>("Streaming:Enabled");
 if (benchmarkEnabled && !builder.Environment.IsDevelopment())
 {
     throw new InvalidOperationException(
@@ -42,6 +43,7 @@ if (builder.Configuration.GetValue<bool>("Observability:Enabled"))
                 options.RecordException = true;
             })
             .AddSource(AgentTelemetryService.ActivitySourceName)
+            .AddSource(StreamingTelemetry.ActivitySourceName)
             .AddOtlpExporter(options =>
             {
                 options.Endpoint = new Uri(otlpEndpoint);
@@ -51,6 +53,7 @@ if (builder.Configuration.GetValue<bool>("Observability:Enabled"))
             .SetExemplarFilter(ExemplarFilterType.TraceBased)
             .AddAspNetCoreInstrumentation()
             .AddMeter(AgentTelemetryService.MeterName)
+            .AddMeter(StreamingTelemetry.MeterName)
             .AddView("media.agent.request.duration",
                 new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
             .AddView("media.agent.llm.duration",
@@ -124,6 +127,22 @@ builder.Services.AddSingleton<IMediaEmbeddingProvider,
     DeterministicMediaEmbeddingProvider>();
 builder.Services.AddScoped<IMediaSearchService, MediaSearchService>();
 builder.Services.AddScoped<MediaEmbeddingIndexer>();
+builder.Services.AddSingleton<IValidateOptions<StreamingOptions>,
+    StreamingOptionsValidator>();
+builder.Services.AddOptions<StreamingOptions>()
+    .Bind(builder.Configuration.GetSection(StreamingOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<SyntheticStreamingProducer>();
+if (streamingEnabled)
+{
+    if (storageProvider != StorageProvider.PostgreSQL)
+    {
+        throw new InvalidOperationException(
+            "Streaming requires PostgreSQL storage for durable idempotency.");
+    }
+    builder.Services.AddScoped<StreamingEventProcessor>();
+    builder.Services.AddHostedService<KafkaEventConsumerService>();
+}
 
 builder.Services.AddScoped<
     MediaIntelligence.Core.Interfaces.IAudienceAnalytics,
@@ -252,6 +271,21 @@ if (args.Contains("--index-media", StringComparer.Ordinal))
     var indexer = scope.ServiceProvider.GetRequiredService<MediaEmbeddingIndexer>();
     var updated = indexer.Refresh();
     app.Logger.LogInformation("Media embedding refresh completed; updated {Count} rows.", updated);
+    return;
+}
+
+if (args.Contains("--produce-stream-events", StringComparer.Ordinal))
+{
+    if (!app.Environment.IsDevelopment())
+    {
+        throw new InvalidOperationException(
+            "Synthetic stream production is restricted to Development.");
+    }
+    var producer = app.Services.GetRequiredService<SyntheticStreamingProducer>();
+    var result = await producer.ProduceAsync();
+    app.Logger.LogInformation(
+        "Achieved synthetic producer throughput {Rate:F1} events/s.",
+        result.AchievedEventsPerSecond);
     return;
 }
 

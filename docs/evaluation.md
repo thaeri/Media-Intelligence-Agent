@@ -5,11 +5,19 @@ provider smoke tests. CI runs only the offline suite.
 
 ## Offline suite
 
-The ordinary offline suite contains 120 xUnit tests. They do not call Ollama,
+The ordinary offline suite contains 126 xUnit tests. They do not call Ollama,
 OpenAI, Foundry, external services, databases, or telemetry infrastructure.
 Two additional real-PostgreSQL tests cover repository parity and pgvector
-search; they are skipped unless `MEDIAINTELLIGENCE_TEST_POSTGRES` points to a dedicated test
+search, and one Redpanda/PostgreSQL test covers streaming round-trip and replay
+safety. They are skipped unless their dedicated environment variables point to test
 database. It uses Npgsql rather than EF's in-memory provider.
+
+Streaming evaluation additionally covers strict v1 contracts, stable UTC
+envelopes, partition keys, unknown-field/version rejection, deterministic
+fixtures, durable duplicate replay, poison-event DLQ handling, consumer
+restart/backlog recovery, and PostgreSQL outage recovery. The real Compose
+streaming run passed 7 focused tests. See [streaming.md](streaming.md) for the
+measured producer rate and failure demonstrations.
 
 Semantic-search evaluation covers deterministic vectors, hybrid ranking,
 top-K/threshold validation, stable ordering, idempotent refresh,

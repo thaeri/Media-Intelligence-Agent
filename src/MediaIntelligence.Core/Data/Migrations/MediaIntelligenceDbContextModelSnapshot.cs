@@ -21,8 +21,8 @@ namespace MediaIntelligence.Core.Data.Migrations
                 .HasAnnotation("ProductVersion", "10.0.4")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
-            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "vector");
+            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("MediaIntelligence.Core.Data.AdImpressionEntity", b =>
                 {
@@ -210,6 +210,33 @@ namespace MediaIntelligence.Core.Data.Migrations
 
                             t.HasCheckConstraint("CK_media_embedding_dimension", "\"Dimension\" > 0");
                         });
+                });
+
+            modelBuilder.Entity("MediaIntelligence.Core.Data.StreamIngestionEntity", b =>
+                {
+                    b.Property<string>("Topic")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("EventTimeUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PayloadSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Topic", "EventId");
+
+                    b.HasIndex("ProcessedAtUtc");
+
+                    b.ToTable("stream_ingestion", (string)null);
                 });
 
             modelBuilder.Entity("MediaIntelligence.Core.Data.ViewingEventEntity", b =>

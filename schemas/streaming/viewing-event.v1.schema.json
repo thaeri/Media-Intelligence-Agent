@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-intelligence.local/schemas/viewing-event.v1.schema.json",
+  "title": "Viewing event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "eventTimeUtc", "data"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "eventId": { "type": "string", "format": "uuid" },
+    "eventTimeUtc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "contentId", "region", "deviceType", "watchDurationSeconds", "completed", "adShown"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "contentId": { "type": "string", "format": "uuid" },
+        "region": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "deviceType": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "watchDurationSeconds": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "boolean" },
+        "adShown": { "type": "boolean" },
+        "deviceId": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    }
+  }
+}

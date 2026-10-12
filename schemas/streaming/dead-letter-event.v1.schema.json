@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://media-intelligence.local/schemas/dead-letter-event.v1.schema.json",
+  "title": "Media event dead letter v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sourceTopic", "sourcePartition", "sourceOffset", "failureCode", "failedAtUtc", "payloadSha256", "originalValue"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "sourceTopic": { "enum": ["viewing-events.v1", "ad-impressions.v1"] },
+    "sourcePartition": { "type": "integer", "minimum": 0 },
+    "sourceOffset": { "type": "integer", "minimum": 0 },
+    "failureCode": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "failedAtUtc": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "payloadSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "originalValue": { "type": "string", "maxLength": 65536 }
+  }
+}

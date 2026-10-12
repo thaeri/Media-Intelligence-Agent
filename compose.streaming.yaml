@@ -1,0 +1,115 @@
+services:
+  redpanda:
+    profiles: ["streaming"]
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.4
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=internal://0.0.0.0:9092
+      - --advertise-kafka-addr=internal://redpanda:9092
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "-X", "brokers=redpanda:9092", "--exit-when-healthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  stream-topics:
+    profiles: ["streaming"]
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.4
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        for topic in viewing-events.v1 ad-impressions.v1 media-events.dlq.v1; do
+          rpk topic create "$${topic}" -X brokers=redpanda:9092 --partitions 3 --replicas 1 --if-not-exists
+        done
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  stream-consumer:
+    profiles: ["streaming"]
+    build:
+      context: .
+      target: runtime
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Storage__Provider: PostgreSQL
+      ConnectionStrings__PostgreSQL: Host=postgres;Port=5432;Database=${POSTGRES_DB:-media_intelligence_test};Username=${POSTGRES_USER:-media_app};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Streaming__Enabled: "true"
+      Streaming__BootstrapServers: redpanda:9092
+      Streaming__ConsumerGroup: media-intelligence-v1
+      Observability__Enabled: ${STREAMING_OBSERVABILITY:-false}
+      Observability__OtlpEndpoint: http://otel-collector:4317
+      Logging__LogLevel__Default: Information
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      stream-topics:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  stream-producer:
+    profiles: ["streaming"]
+    build:
+      context: .
+      target: runtime
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Storage__Provider: InMemory
+      Streaming__BootstrapServers: redpanda:9092
+      Streaming__ProducerViewingCount: ${STREAM_VIEWING_COUNT:-1000}
+      Streaming__ProducerAdCount: ${STREAM_AD_COUNT:-500}
+      Streaming__ProducerRatePerSecond: ${STREAM_RATE_PER_SECOND:-0}
+      Streaming__ProducerBurstSize: ${STREAM_BURST_SIZE:-100}
+      Streaming__ProducerDuplicateEvery: ${STREAM_DUPLICATE_EVERY:-100}
+      Streaming__ProducerIncludePoison: ${STREAM_INCLUDE_POISON:-true}
+    command: ["--produce-stream-events"]
+    depends_on:
+      stream-topics:
+        condition: service_completed_successfully
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  streaming-tests:
+    profiles: ["streaming-test"]
+    build:
+      context: .
+      target: test
+    environment:
+      MEDIAINTELLIGENCE_TEST_POSTGRES: Host=postgres;Port=5432;Database=${POSTGRES_DB:-media_intelligence_test};Username=${POSTGRES_USER:-media_app};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      MEDIAINTELLIGENCE_TEST_KAFKA: redpanda:9092
+    command: ["--filter", "FullyQualifiedName~Streaming"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      stream-topics:
+        condition: service_completed_successfully
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  redpanda-data:
