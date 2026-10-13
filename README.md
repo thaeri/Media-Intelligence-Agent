@@ -194,7 +194,7 @@ observability/                   Collector, Prometheus, Tempo, Grafana config
 docs/                            Design, evaluation, operations, demo
 ```
 
-Key references: [Demo](docs/demo.md) · [Architecture](docs/architecture.md) · [Engineering decisions](docs/engineering-decisions.md) · [Evaluation](docs/evaluation.md) · [Performance](docs/performance.md) · [Semantic search](docs/semantic-search.md) · [Observability](docs/observability.md)
+Key references: [Demo](docs/demo.md) · [Architecture](docs/architecture.md) · [Architecture evolution](docs/architecture-evolution.md) · [Scalability model](docs/scalability.md) · [Engineering decisions](docs/engineering-decisions.md) · [Evaluation](docs/evaluation.md) · [Performance](docs/performance.md) · [Semantic search](docs/semantic-search.md) · [Observability](docs/observability.md)
 
 Optional streaming: [Kafka-compatible event pipeline](docs/streaming.md) and [scalability measurements](docs/streaming-performance.md). They use a separate Compose override and do not change default startup.
 
