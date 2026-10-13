@@ -64,6 +64,12 @@ if (builder.Configuration.GetValue<bool>("Observability:Enabled"))
                 new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
             .AddView("media.storage.operation.duration",
                 new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
+            .AddView("media.streaming.poll.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
+            .AddView("media.streaming.database.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
+            .AddView("media.streaming.offset.commit.duration",
+                new ExplicitBucketHistogramConfiguration { Boundaries = latencyBuckets })
             .AddOtlpExporter(options =>
             {
                 options.Endpoint = new Uri(otlpEndpoint);
@@ -141,7 +147,8 @@ if (streamingEnabled)
             "Streaming requires PostgreSQL storage for durable idempotency.");
     }
     builder.Services.AddScoped<StreamingEventProcessor>();
-    builder.Services.AddHostedService<KafkaEventConsumerService>();
+    builder.Services.AddScoped<StreamingBatchEventProcessor>();
+    builder.Services.AddHostedService<BatchedKafkaEventConsumerService>();
 }
 
 builder.Services.AddScoped<

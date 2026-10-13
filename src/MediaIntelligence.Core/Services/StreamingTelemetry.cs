@@ -23,6 +23,16 @@ public static class StreamingTelemetry
         "media.streaming.processing.duration", "s");
     public static readonly Histogram<double> Freshness = Meter.CreateHistogram<double>(
         "media.streaming.event.freshness", "s");
+    public static readonly Histogram<double> PollDuration = Meter.CreateHistogram<double>(
+        "media.streaming.poll.duration", "s");
+    public static readonly Histogram<double> DatabaseDuration = Meter.CreateHistogram<double>(
+        "media.streaming.database.duration", "s");
+    public static readonly Histogram<double> CommitDuration = Meter.CreateHistogram<double>(
+        "media.streaming.offset.commit.duration", "s");
+    public static readonly Histogram<long> BatchSize = Meter.CreateHistogram<long>(
+        "media.streaming.batch.size", "events");
+    public static readonly Counter<long> Transactions = Meter.CreateCounter<long>(
+        "media.streaming.transactions");
     private static readonly ObservableGauge<long> ConsumerLag =
         Meter.CreateObservableGauge("media.streaming.consumer.lag",
             ObserveLag, "messages");

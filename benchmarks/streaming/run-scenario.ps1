@@ -3,6 +3,8 @@ param(
     [Parameter(Mandatory)] [ValidatePattern('^[a-z0-9-]+$')] [string] $Scenario,
     [ValidateRange(1, 12)] [int] $Partitions = 3,
     [ValidateRange(1, 12)] [int] $Consumers = 1,
+    [ValidateRange(1, 1000)] [int] $ConsumerBatchSize = 1,
+    [ValidateRange(1, 5000)] [int] $ConsumerBatchWaitMilliseconds = 25,
     [ValidateRange(0, 999999)] [int] $ViewingEvents = 1000,
     [ValidateRange(0, 999999)] [int] $AdImpressions = 500,
     [ValidateRange(1, 1024)] [int] $ProducerConcurrency = 64,
@@ -10,6 +12,7 @@ param(
     [ValidateRange(0, 1000)] [int] $ProducerLingerMilliseconds = 5,
     [ValidateRange(0, 999999)] [int] $Seed = 1,
     [string] $PostgresPassword = 'stream-benchmark-local',
+    [switch] $IncludePoison,
     [switch] $VerifyRestartRecovery,
     [switch] $KeepEnvironment
 )
@@ -21,10 +24,12 @@ $compose = @('-p', $project, '-f', 'compose.yaml', '-f',
     '--profile', 'streaming')
 $env:POSTGRES_PASSWORD = $PostgresPassword
 $env:STREAM_PARTITIONS = $Partitions.ToString()
+$env:STREAM_CONSUMER_BATCH_SIZE = $ConsumerBatchSize.ToString()
+$env:STREAM_CONSUMER_BATCH_WAIT_MS = $ConsumerBatchWaitMilliseconds.ToString()
 $env:STREAM_VIEWING_COUNT = $ViewingEvents.ToString()
 $env:STREAM_AD_COUNT = $AdImpressions.ToString()
 $env:STREAM_DUPLICATE_EVERY = '0'
-$env:STREAM_INCLUDE_POISON = 'false'
+$env:STREAM_INCLUDE_POISON = $IncludePoison.ToString().ToLowerInvariant()
 $env:STREAM_PRODUCER_CONCURRENCY = $ProducerConcurrency.ToString()
 $env:STREAM_PRODUCER_BATCH_SIZE = $ProducerBatchSize.ToString()
 $env:STREAM_PRODUCER_LINGER_MS = $ProducerLingerMilliseconds.ToString()
@@ -93,6 +98,10 @@ try {
     $drainSeconds = Wait-Ledger ($ViewingEvents + $AdImpressions)
     Wait-ZeroLag
     $drainWatch.Stop()
+    $databaseCommits = [long](& docker exec "$project-postgres-1" psql `
+        -U media_app -d media_intelligence_test -tAc `
+        "SELECT count(DISTINCT to_jsonb(stream_ingestion)->>'ProcessedAtUtc') FROM stream_ingestion")
+    if ($LASTEXITCODE -ne 0) { throw 'Could not read database transaction count.' }
     $consumerRate = ($ViewingEvents + $AdImpressions) /
         [Math]::Max($drainSeconds, 0.001)
 
@@ -195,6 +204,8 @@ try {
         scenario = $Scenario
         partitions = $Partitions
         consumers = $Consumers
+        consumerBatchSize = $ConsumerBatchSize
+        consumerBatchWaitMilliseconds = $ConsumerBatchWaitMilliseconds
         viewingEvents = $ViewingEvents
         adImpressions = $AdImpressions
         producerConcurrency = $ProducerConcurrency
@@ -203,6 +214,9 @@ try {
         producerEventsPerSecond = $producerRate
         consumerDrainSeconds = [Math]::Round($drainSeconds, 3)
         consumerEventsPerSecond = [Math]::Round($consumerRate, 1)
+        databaseCommitsDuringDrain = $databaseCommits
+        databaseCommitsPerSecond = [Math]::Round(
+            $databaseCommits / [Math]::Max($drainSeconds, 0.001), 1)
         freshnessP50Milliseconds = [Math]::Round($percentiles[0] * 1000, 1)
         freshnessP95Milliseconds = [Math]::Round($percentiles[1] * 1000, 1)
         freshnessP99Milliseconds = [Math]::Round($percentiles[2] * 1000, 1)

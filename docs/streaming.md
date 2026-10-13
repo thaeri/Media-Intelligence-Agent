@@ -72,6 +72,8 @@ The topic job idempotently creates three partitions and replication factor one f
 | `STREAM_PRODUCER_LINGER_MS` | 0 | Bounded batching delay |
 | `STREAM_PRODUCER_SEED` | 0 | Stable event-ID namespace for isolated runs |
 | `STREAM_USE_CURRENT_TIME` | false | Use producer start time for freshness experiments |
+| `STREAM_CONSUMER_BATCH_SIZE` | 1 | Maximum events persisted per transaction; `1` preserves the reliability-first baseline |
+| `STREAM_CONSUMER_BATCH_WAIT_MS` | 25 | Maximum wait after the first event while filling a batch |
 
 The data generator is deterministic: IDs, event times, entity associations, and ordering repeat for identical counts. Re-running it is therefore an intentional duplicate-replay test.
 
@@ -120,6 +122,7 @@ The consumer emits bounded topic/outcome/failure-code dimensions for:
 - approximate consumer lag;
 - event-time freshness;
 - duplicates, DLQ records, and exhausted processing cycles.
+- poll, database transaction, and offset-commit duration, batch size, and transaction rate.
 
 `stream.consume` activities identify the messaging system and topic. Event bodies, stable event IDs, device IDs, credentials, and partition keys are excluded from logs, spans, and metric labels. The existing Grafana dashboard gains four streaming panels. To export them, combine the streaming and observability overrides and set `STREAMING_OBSERVABILITY=true`.
 

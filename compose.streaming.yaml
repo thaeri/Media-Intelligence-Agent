@@ -53,6 +53,8 @@ services:
       Streaming__Enabled: "true"
       Streaming__BootstrapServers: redpanda:9092
       Streaming__ConsumerGroup: media-intelligence-v1
+      Streaming__ConsumerBatchSize: ${STREAM_CONSUMER_BATCH_SIZE:-1}
+      Streaming__ConsumerBatchWaitMilliseconds: ${STREAM_CONSUMER_BATCH_WAIT_MS:-25}
       Observability__Enabled: ${STREAMING_OBSERVABILITY:-false}
       Observability__OtlpEndpoint: http://otel-collector:4317
       Logging__LogLevel__Default: Information

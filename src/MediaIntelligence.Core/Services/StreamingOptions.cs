@@ -10,6 +10,9 @@ public sealed class StreamingOptions
     public string ConsumerGroup { get; set; } = "media-intelligence-v1";
     public int MaxRetries { get; set; } = 3;
     public int RetryDelayMilliseconds { get; set; } = 250;
+    public int ConsumerBatchSize { get; set; } = 1;
+    public int ConsumerBatchWaitMilliseconds { get; set; } = 25;
+    public int ConsumerShutdownTimeoutSeconds { get; set; } = 30;
     public int ProducerViewingCount { get; set; } = 1000;
     public int ProducerAdCount { get; set; } = 500;
     public int ProducerRatePerSecond { get; set; }
@@ -36,6 +39,12 @@ public sealed class StreamingOptionsValidator : IValidateOptions<StreamingOption
             failures.Add("Streaming:MaxRetries must be between 1 and 10.");
         if (options.RetryDelayMilliseconds is < 10 or > 30_000)
             failures.Add("Streaming:RetryDelayMilliseconds must be between 10 and 30000.");
+        if (options.ConsumerBatchSize is < 1 or > 1000)
+            failures.Add("Streaming:ConsumerBatchSize must be between 1 and 1000.");
+        if (options.ConsumerBatchWaitMilliseconds is < 1 or > 5000)
+            failures.Add("Streaming:ConsumerBatchWaitMilliseconds must be between 1 and 5000.");
+        if (options.ConsumerShutdownTimeoutSeconds is < 1 or > 300)
+            failures.Add("Streaming:ConsumerShutdownTimeoutSeconds must be between 1 and 300.");
         if (options.ProducerViewingCount < 0 || options.ProducerAdCount < 0 ||
             options.ProducerRatePerSecond < 0 || options.ProducerDuplicateEvery < 0)
             failures.Add("Streaming producer counts and rates cannot be negative.");

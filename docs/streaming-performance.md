@@ -87,3 +87,35 @@ The benchmark reads exact freshness percentiles from PostgreSQL because Promethe
 - The optional restart measurement includes container restart/rebalance time and is not a pure consumer processing benchmark.
 
 Possible production experiments—not targets—include batched database writes, more entity keys, longer steady-state runs, controlled CPU/memory limits, replication, authenticated networking, and repeated trials with variance reporting.
+
+## Step 18C: safe consumer micro-batching
+
+The consumer now supports bounded micro-batches. `ConsumerBatchSize` defaults to `1`; changing it is explicit in the optional streaming Compose override. After the first blocking poll, the consumer collects at most the configured size for at most `ConsumerBatchWaitMilliseconds`. Polling and persistence remain on one consumer thread, providing bounded memory/backpressure and preserving each partition's observed order.
+
+One PostgreSQL transaction reads ledger/domain state, classifies the batch, inserts all valid domain rows and `(Topic, EventId)` ledger rows, and calls `SaveChanges` once. Duplicate events with matching hashes are safe; reused IDs with different hashes and semantic failures are rejected. Invalid JSON and semantic failures are acknowledged only after their `acks=all` DLQ publish succeeds. The consumer commits the highest next offset for each represented partition only after the database transaction and all required DLQ writes complete. Database, DLQ, shutdown, rebalance, or uncertain offset-commit failures therefore leave offsets replayable. A retry may duplicate a DLQ record if failure occurs after DLQ acknowledgement but before source offset commit; source domain rows remain idempotent.
+
+Shutdown does not accept more batches after cancellation. A batch already collected either completes within the bounded shutdown timeout or rolls back and replays. Rebalance/commit uncertainty similarly relies on uncommitted replay; seeks are attempted only for still-owned partitions.
+
+### Matched measurements
+
+Measured on 2026-10-13 with the same hardware and container topology documented above. Each retained repetition used 1,500 unique events, three partitions, three consumers, producer concurrency 128, producer batch ceiling 1,000, and 5 ms producer linger. The baseline used consumer batch size 1. Batched runs used size 100 and 25 ms maximum wait. Each repetition used an isolated database, topics, and event-ID seed.
+
+The baseline is the new consumer configured with batch size 1, preserving the old one-message transaction and offset-commit behavior. It is not a checkout of the old binary, so the comparison isolates configuration and transaction amortization within one implementation rather than claiming a historical binary benchmark.
+
+| Mode | Runs (events/s) | Mean events/s | Sample SD | CV | Mean freshness p50 / p95 / p99 | Transactions per 1,500 events |
+| --- | --- | ---: | ---: | ---: | --- | ---: |
+| Per-event baseline | 65.9, 106.0, 104.5 | 92.1 | 22.7 | 24.7% | 18.195 / 23.826 / 24.603 s | 1,498–1,500 |
+| Batch 100 / 25 ms | 242.2, 298.1, 389.0 | 309.8 | 74.1 | 23.9% | 11.173 / 12.988 / 13.007 s | 15–16 |
+
+In these runs batching improved mean durable drain throughput by **3.36x**, reduced the transaction proxy by approximately **99%**, and lowered mean p95 freshness by **45.5%**. Variability remained material, so the individual runs and CV are reported rather than presenting the mean as a capacity target. Transaction count is derived from distinct durable `ProcessedAtUtc` batch timestamps; two baseline transactions can share the same clock value, so the baseline range is a close proxy while the application OTel transaction counter is exact.
+
+### Recovery and correctness experiments
+
+- **Replay and HTTP:** every matched run replayed its identical seed. Ledger and HTTP viewing/campaign totals were unchanged. The consent check again moved total impressions from 10 to 22 while eligible impressions stayed 5 and unknown-device exclusions moved from 1 to 13.
+- **Crash during backlog:** a one-consumer, batch-100, 6,000-event run was hard-stopped and restarted. It completed with exactly 6,000 durable ledger rows, zero final lag, unchanged replay totals, and 61 transaction timestamps.
+- **PostgreSQL outage:** PostgreSQL was stopped while a replay backlog was active. The consumer group retained 6,000 lagged offsets. After PostgreSQL restarted, lag returned to zero; the ledger remained 6,000 and replay did not change HTTP totals.
+- **Poison and restart:** a 45-valid-event batch plus poison record drained successfully. The subsequent stopped-consumer check showed 46 lagged records (45 valid plus poison); restart returned lag to zero in 7.140 seconds, with 45 new ledger rows and the poison routed through the DLQ path.
+- **Rebalance:** a 6,000-event backlog was scaled from one to three batch-100 consumer instances, forcing group reassignment. The run completed at zero lag with exactly 6,000 ledger rows and unchanged replay totals.
+- **Per-key ordering:** the real Redpanda test continues to verify ascending event sequence for every topic/key group under concurrent production. Database classification processes each collected batch in poll order.
+
+The real integration suite covers batch duplicates, semantic failure isolation, durable replay, and per-key ordering. The outage, hard-stop, poison, restart, and scale-out exercises are controlled Compose demonstrations rather than fault-injection unit tests; timing of the hard stop cannot prove which SQL statement was executing when the container stopped.

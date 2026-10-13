@@ -92,6 +92,9 @@ public sealed class StreamingEventTests
                 MaxRetries = 0,
                 ProducerViewingCount = -1,
                 ProducerBurstSize = 0,
+                ConsumerBatchSize = 0,
+                ConsumerBatchWaitMilliseconds = 0,
+                ConsumerShutdownTimeoutSeconds = 0,
                 ProducerConcurrency = 0,
                 ProducerBatchSize = 0
             });
@@ -102,5 +105,8 @@ public sealed class StreamingEventTests
         Assert.Contains(result.Failures!, item => item.Contains("BurstSize"));
         Assert.Contains(result.Failures!, item => item.Contains("Concurrency"));
         Assert.Contains(result.Failures!, item => item.Contains("BatchSize"));
+        Assert.Contains(result.Failures!, item => item.Contains("ConsumerBatchSize"));
+        Assert.Contains(result.Failures!, item => item.Contains("ConsumerBatchWait"));
+        Assert.Contains(result.Failures!, item => item.Contains("ShutdownTimeout"));
     }
 }

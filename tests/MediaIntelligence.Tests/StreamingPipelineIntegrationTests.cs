@@ -11,6 +11,55 @@ namespace MediaIntelligence.Tests;
 public sealed class StreamingPipelineIntegrationTests
 {
     [StreamingFact]
+    public async Task BatchTransactionHandlesDuplicatesAndSemanticFailures()
+    {
+        var connectionString = Environment.GetEnvironmentVariable(
+            PostgreSqlFactAttribute.ConnectionStringVariable)!;
+        var options = new DbContextOptionsBuilder<MediaIntelligenceDbContext>()
+            .UseNpgsql(connectionString, npgsql => npgsql.UseVector()).Options;
+        await using var dbContext = new MediaIntelligenceDbContext(options);
+        await PostgreSqlDatabaseInitializer.MigrateAndSeedAsync(dbContext);
+        var generated = SyntheticStreamingProducer.CreateEvents(2, 1,
+            new DateTime(2026, 1, 10, 0, 0, 0, DateTimeKind.Utc), 525);
+        var decoded = generated.Select(item => new StreamBatchItem(item.Topic,
+            StreamingEventCodec.Decode(item.Topic, item.Value))).ToList();
+        decoded.Insert(1, decoded[0]);
+        var invalid = decoded[2];
+        decoded[2] = invalid with
+        {
+            Message = invalid.Message with
+            {
+                ViewingEvent = invalid.Message.ViewingEvent! with
+                {
+                    ContentId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+                }
+            }
+        };
+
+        var processor = new StreamingBatchEventProcessor(dbContext);
+        var results = await processor.ProcessAsync(decoded, CancellationToken.None);
+        var replay = await processor.ProcessAsync(decoded, CancellationToken.None);
+
+        Assert.True(results[0].Outcome is StreamProcessOutcome.Inserted or
+            StreamProcessOutcome.Duplicate);
+        Assert.Equal(StreamProcessOutcome.Duplicate, results[1].Outcome);
+        Assert.Equal("unknown_content", results[2].FailureCode);
+        Assert.True(results[3].Outcome is StreamProcessOutcome.Inserted or
+            StreamProcessOutcome.Duplicate);
+        Assert.Equal(StreamProcessOutcome.Duplicate, replay[0].Outcome);
+        Assert.Equal(StreamProcessOutcome.Duplicate, replay[1].Outcome);
+        Assert.Equal("unknown_content", replay[2].FailureCode);
+        Assert.Equal(StreamProcessOutcome.Duplicate, replay[3].Outcome);
+        var persistedIds = new[]
+        {
+            decoded[0].Message.EventId,
+            decoded[3].Message.EventId
+        };
+        Assert.Equal(2, await dbContext.StreamIngestions.CountAsync(item =>
+            persistedIds.Contains(item.EventId)));
+    }
+
+    [StreamingFact]
     public async Task ConcurrentProducerPreservesOrderingWithinEachKey()
     {
         var bootstrap = Environment.GetEnvironmentVariable(
@@ -128,6 +177,7 @@ public sealed class StreamingPipelineIntegrationTests
             StreamingTopics.AdImpressions]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var results = new List<ConsumeResult<string, string>>();
+        var seenEventIds = new HashSet<Guid>();
         var minimum = (long)seed * 1_000_000;
         while (results.Count < expectedCount)
         {
@@ -135,7 +185,8 @@ public sealed class StreamingPipelineIntegrationTests
             var decoded = StreamingEventCodec.Decode(result.Topic,
                 result.Message.Value);
             var sequence = Sequence(decoded.EventId);
-            if (sequence > minimum && sequence <= minimum + 999_999)
+            if (sequence > minimum && sequence <= minimum + 999_999 &&
+                seenEventIds.Add(decoded.EventId))
                 results.Add(result);
         }
         return results;
